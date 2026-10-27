@@ -9,6 +9,7 @@
 
 #include "xenia/kernel/xam/xam_avatar.h"
 #include "xenia/base/logging.h"
+#include "xenia/base/math.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xam/xam_private.h"
 
@@ -125,12 +126,45 @@ dword_result_t XamAvatarGetManifestsByXuid_entry(
 }
 DECLARE_XAM_EXPORT1(XamAvatarGetManifestsByXuid, kAvatars, kStub)
 
+// The sizes xam's avatar app reports for the component mask (0x81965EC0):
+// a fixed part, then for each of the 13 components asked for its header,
+// 16 byte aligned, and its GPU resources, page aligned (table at 0x816332B8).
+struct AvatarComponentSizes {
+  uint32_t header;
+  uint32_t gpu_resources;
+};
+constexpr AvatarComponentSizes kAvatarComponentSizes[] = {
+    {0x800, 0x53800}, {0x400, 0x12C00}, {0x800, 0xE000}, {0x800, 0x14400},
+    {0x800, 0xF000},  {0x800, 0xD400},  {0x800, 0xA400}, {0x800, 0x6800},
+    {0x800, 0x8400},  {0x800, 0x5C00},  {0x800, 0x5800}, {0x800, 0x5C00},
+    {0x800, 0x19000},
+};
+constexpr uint32_t kAvatarResultFixedSize = 0x1F80;
+// The component with bit 12 set brings an extra 0x3147C bytes of results.
+constexpr uint32_t kAvatarComponentBit12ResultSize = 0x3147C;
+
 dword_result_t XamAvatarGetAssetsResultSize_entry(
     dword_t avatar_component_mask, lpdword_t result_buffer_size_ptr,
     lpdword_t gpu_resource_buffer_size_ptr) {
-  *result_buffer_size_ptr = 0;
-  *gpu_resource_buffer_size_ptr = 0;
-
+  const uint16_t mask = static_cast<uint16_t>(avatar_component_mask);
+  uint32_t result_size = kAvatarResultFixedSize;
+  if (mask & 0x1000) {
+    result_size += kAvatarComponentBit12ResultSize;
+  }
+  uint32_t gpu_resource_size = 0;
+  for (uint32_t i = 0; i < xe::countof(kAvatarComponentSizes); ++i) {
+    if (mask & (1u << i)) {
+      result_size += xe::align(kAvatarComponentSizes[i].header, 0x10u);
+      gpu_resource_size +=
+          xe::align(kAvatarComponentSizes[i].gpu_resources, 0x1000u);
+    }
+  }
+  if (result_buffer_size_ptr) {
+    *result_buffer_size_ptr = result_size;
+  }
+  if (gpu_resource_buffer_size_ptr) {
+    *gpu_resource_buffer_size_ptr = gpu_resource_size;
+  }
   return X_STATUS_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamAvatarGetAssetsResultSize, kAvatars, kStub);
