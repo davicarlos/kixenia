@@ -139,18 +139,17 @@ constexpr AvatarComponentSizes kAvatarComponentSizes[] = {
     {0x800, 0x8400},  {0x800, 0x5C00},  {0x800, 0x5800}, {0x800, 0x5C00},
     {0x800, 0x19000},
 };
+// The fixed part holds the asset header, the skeleton and the per component
+// tables; asking for the body (bit 12) adds its skeleton and animation room.
 constexpr uint32_t kAvatarResultFixedSize = 0x1F80;
-// The component with bit 12 set brings an extra 0x3147C bytes of results.
-constexpr uint32_t kAvatarComponentBit12ResultSize = 0x3147C;
+constexpr uint32_t kAvatarResultFixedSizeWithBody = 0x3147C;
 
 dword_result_t XamAvatarGetAssetsResultSize_entry(
     dword_t avatar_component_mask, lpdword_t result_buffer_size_ptr,
     lpdword_t gpu_resource_buffer_size_ptr) {
   const uint16_t mask = static_cast<uint16_t>(avatar_component_mask);
-  uint32_t result_size = kAvatarResultFixedSize;
-  if (mask & 0x1000) {
-    result_size += kAvatarComponentBit12ResultSize;
-  }
+  uint32_t result_size =
+      (mask & 0x1000) ? kAvatarResultFixedSizeWithBody : kAvatarResultFixedSize;
   uint32_t gpu_resource_size = 0;
   for (uint32_t i = 0; i < xe::countof(kAvatarComponentSizes); ++i) {
     if (mask & (1u << i)) {
