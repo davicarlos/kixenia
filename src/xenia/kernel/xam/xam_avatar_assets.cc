@@ -88,6 +88,7 @@ constexpr uint8_t kStrbFormat[16] = {0x59, 0xBD, 0xE0, 0x8B, 0x49, 0x09,
                                      0x4E, 0xE4, 0xB9, 0x91, 0xAD, 0xA8,
                                      0x7B, 0x7C, 0x0B, 0x6B};
 enum StrbBlock : uint8_t {
+  kStrbBlockFaceTexture = 2,
   kStrbBlockModel = 3,
   kStrbBlockDescriptorV1 = 6,
   kStrbBlockPalette = 7,
@@ -383,6 +384,8 @@ Color UnpackColor(uint32_t argb, uint32_t id) {
 struct QueuedPart {
   std::array<uint8_t, kPartRecordSize> record;
   uint32_t kind;
+  // The manifest slot of a face texture (kind 2) or shape (kind 3).
+  uint32_t slot = 0;
   std::vector<Color> colors;
 };
 
@@ -581,16 +584,14 @@ bool DecodeMesh(Stream& stream, uint8_t* record, uint32_t gpu_base,
   return true;
 }
 
-// 0x81978680: rows of texture blocks, tiled here when the asset asks for it.
-bool DecodeTexture(Stream& stream, uint8_t* record, uint32_t gpu_base) {
+// 0x81978680: a texture header and its rows of blocks, written over a texture
+// record that already says where its data goes (+0x24) and how much room it
+// has (+0xC). Tiled here when the asset asks for it.
+bool FillTexture(Stream& stream, uint8_t* record) {
   std::span<const uint8_t> bytes;
-  if (!stream.Take(8, &bytes)) {
-    return false;
-  }
-  BitReader place(bytes);
-  uint32_t data_offset = place.Read(0, 32);
-  uint32_t data_size = place.Read(0x20, 32);
-  if (!stream.Take(0x21, &bytes)) {
+  uint32_t data = load_be32(record + 0x24);
+  uint32_t room = load_be32(record + 0x0C);
+  if (!data || !stream.Take(0x21, &bytes)) {
     return false;
   }
   BitReader bits(bytes);
@@ -604,8 +605,11 @@ bool DecodeTexture(Stream& stream, uint8_t* record, uint32_t gpu_base) {
   bool tile = bits.Read(0xC1, 1);
   uint32_t row_bytes = bits.Read(0xC2, 32);
   uint32_t rows = bits.Read(0xE2, 32);
+  if (size > room) {
+    XELOGE("Avatar: texture of {:X} bytes for room of {:X}", size, room);
+    return false;
+  }
 
-  uint32_t data = gpu_base + data_offset;
   std::memset(record, 0, kTextureRecordSize);
   StoreU32(record + 0x00, format);
   StoreU32(record + 0x04, width);
@@ -615,12 +619,9 @@ bool DecodeTexture(Stream& stream, uint8_t* record, uint32_t gpu_base) {
   StoreU32(record + 0x1C, 1);
   StoreU32(record + 0x20, slices);
   StoreU32(record + 0x24, data);
-  if (size > data_size) {
-    return false;
-  }
   uint8_t* out = TranslateVirtual(data);
   if (empty) {
-    std::memset(out, 0, size_t(slice_size) * std::max(slices, 1u));
+    std::memset(out, 0, size);
     return true;
   }
   // Only the DXT formats (8 or 16 bytes per 4x4 block) are in the pack.
@@ -628,8 +629,8 @@ bool DecodeTexture(Stream& stream, uint8_t* record, uint32_t gpu_base) {
   uint32_t blocks_wide = row_bytes / block_bytes;
   uint32_t pitch_blocks = xe::align(blocks_wide, 32u);
   uint32_t pitch = pitch_blocks * block_bytes;
-  if (size_t(pitch) * rows > slice_size ||
-      size_t(slices - 1) * slice_size + size_t(pitch) * rows > data_size) {
+  if (!slices || size_t(pitch) * rows > slice_size ||
+      size_t(slices - 1) * slice_size + size_t(pitch) * rows > size) {
     XELOGE("Avatar: texture {}x{} doesn't fit its slices", width, height);
     return false;
   }
@@ -656,6 +657,23 @@ bool DecodeTexture(Stream& stream, uint8_t* record, uint32_t gpu_base) {
     }
   }
   return true;
+}
+
+// A model's texture: where its data goes in the GPU buffer and how much room
+// it has (0x81974A90 and 0x81977690), then the texture itself. Textures the
+// model only reserves are marked empty; face textures fill them later.
+bool DecodeTexture(Stream& stream, uint8_t* record, uint32_t gpu_base) {
+  std::span<const uint8_t> bytes;
+  if (!stream.Take(8, &bytes)) {
+    return false;
+  }
+  BitReader place(bytes);
+  std::memset(record, 0, kTextureRecordSize);
+  StoreU32(record + 0x00, 0x1A200154);
+  StoreU32(record + 0x0C, place.Read(0x20, 32));
+  StoreU32(record + 0x1C, 1);
+  StoreU32(record + 0x24, gpu_base + place.Read(0, 32));
+  return FillTexture(stream, record);
 }
 
 // 0x81971CA8: vertices shared by seams get the position and the 8 bytes at
@@ -790,6 +808,65 @@ bool BuildComponent(const QueuedPart& part,
   return true;
 }
 
+// The material subsets each face texture slot fills (0x81632F08).
+constexpr uint32_t kFaceSlotSubsets[6][2] = {
+    {0xC, 0}, {0x9, 0xA}, {0x7, 0x8}, {0x6, 0}, {0xB, 0}, {0x5, 0}};
+
+// 0x819671A0: a face texture fills, in the components already built, the
+// textures that the subsets of its slot point to (the u16 at +8 of the
+// subset). The head reserves them as empty textures of the right size.
+bool ApplyFaceTexture(const QueuedPart& part,
+                      const std::vector<StrbBlockView>& blocks,
+                      uint8_t* components, uint32_t built) {
+  if (part.slot >= xe::countof(kFaceSlotSubsets)) {
+    return false;
+  }
+  const StrbBlockView* texture = nullptr;
+  for (const auto& block : blocks) {
+    if (block.type == kStrbBlockFaceTexture) {
+      texture = &block;
+      break;
+    }
+  }
+  std::vector<uint8_t> data;
+  if (!texture || !Decompress(texture->body, &data)) {
+    return false;
+  }
+  Stream stream(data);
+  for (int32_t c = int32_t(built) - 1; c >= 0; --c) {
+    const uint8_t* component = components + c * kComponentSize;
+    uint32_t meshes = load_be32(component + 0x14);
+    uint32_t textures = load_be32(component + 0x18);
+    uint8_t* mesh_records = TranslateVirtual(load_be32(component + 0x2C));
+    uint8_t* texture_records = TranslateVirtual(load_be32(component + 0x30));
+    uint64_t filled = 0;
+    for (uint32_t id : kFaceSlotSubsets[part.slot]) {
+      if (!id) {
+        break;
+      }
+      for (int32_t m = int32_t(meshes) - 1; m >= 0; --m) {
+        for (int32_t s = kMeshMaxSubsets - 1; s >= 0; --s) {
+          const uint8_t* subset =
+              mesh_records + m * kMeshRecordSize + 4 + s * 0x18;
+          if (load_be32(subset + 4) != id) {
+            continue;
+          }
+          uint32_t index = xe::load_and_swap<uint16_t>(subset + 8);
+          if (index >= textures || index >= 64 || (filled >> index) & 1) {
+            continue;
+          }
+          filled |= uint64_t(1) << index;
+          if (!FillTexture(stream,
+                           texture_records + index * kTextureRecordSize)) {
+            return false;
+          }
+        }
+      }
+    }
+  }
+  return true;
+}
+
 uint32_t ManifestColor(const uint8_t* manifest, uint32_t index) {
   return load_be32(manifest + kManifestColors + index * 4);
 }
@@ -854,6 +931,7 @@ std::vector<QueuedPart> QueueParts(const uint8_t* manifest, uint16_t mask) {
         QueuedPart part{};
         std::memcpy(part.record.data(), record, 0x20);
         part.kind = 2;
+        part.slot = i;
         parts.push_back(part);
       }
     }
@@ -863,6 +941,7 @@ std::vector<QueuedPart> QueueParts(const uint8_t* manifest, uint16_t mask) {
         QueuedPart part{};
         std::memcpy(part.record.data(), id, 0x10);
         part.kind = 3;
+        part.slot = i;
         parts.push_back(part);
       }
     }
@@ -1054,42 +1133,62 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
   StoreU32(header + 0xC, records);
   StoreU32(header + 0x10, components);
 
+  // Components first, then what goes into them: face textures fill the
+  // textures the head reserved (0x81969490 defers them, 0x819672F8).
+  std::vector<QueuedPart> parts = QueueParts(manifest, component_mask);
+  uint8_t* component_tables = TranslateVirtual(components);
   uint32_t built = 0;
-  for (const auto& part : QueueParts(manifest, component_mask)) {
-    auto file = FindAsset(part.record.data());
-    if (!file) {
-      XELOGW("Avatar: asset {:016X}{:016X} not available",
-             xe::load_and_swap<uint64_t>(&part.record[0]),
-             xe::load_and_swap<uint64_t>(&part.record[8]));
-      continue;
-    }
-    std::vector<StrbBlockView> blocks;
-    AssetDescriptor descriptor;
-    if (!ParseStrb(*file, &blocks) || !ParseDescriptor(blocks, &descriptor)) {
-      XELOGW("Avatar: unreadable asset {:016X}",
+  for (uint32_t pass = 1; pass <= 2; ++pass) {
+    for (const auto& part : parts) {
+      if (part.kind != pass && !(pass == 2 && part.kind == 3)) {
+        continue;
+      }
+      auto file = FindAsset(part.record.data());
+      if (!file) {
+        XELOGW("Avatar: asset {:016X}{:016X} not available",
+               xe::load_and_swap<uint64_t>(&part.record[0]),
+               xe::load_and_swap<uint64_t>(&part.record[8]));
+        continue;
+      }
+      std::vector<StrbBlockView> blocks;
+      AssetDescriptor descriptor;
+      if (!ParseStrb(*file, &blocks) ||
+          !ParseDescriptor(blocks, &descriptor)) {
+        XELOGW("Avatar: unreadable asset {:016X}",
+               xe::load_and_swap<uint64_t>(&part.record[0]));
+        continue;
+      }
+      if (part.kind == 2) {
+        if (ApplyFaceTexture(part, blocks, component_tables, built)) {
+          XELOGI("Avatar: face texture {} from {:016X}", part.slot,
+                 xe::load_and_swap<uint64_t>(&part.record[0]));
+        } else {
+          XELOGW("Avatar: face texture {} from {:016X} failed", part.slot,
+                 xe::load_and_swap<uint64_t>(&part.record[0]));
+        }
+        continue;
+      }
+      if (part.kind == 3) {
+        // Shapes (0x81966138) aren't applied yet.
+        XELOGD("Avatar: skipping shape {}", part.slot);
+        continue;
+      }
+      if (built >= kMaxParts) {
+        continue;
+      }
+      uint8_t* component = component_tables + built * kComponentSize;
+      if (!BuildComponent(part, blocks, component, buffers)) {
+        std::memset(component, 0, kComponentSize);
+        continue;
+      }
+      std::memcpy(TranslateVirtual(records) + built * kPartRecordSize,
+                  part.record.data(), kPartRecordSize);
+      ++built;
+      StoreU32(header + 0x8, built);
+      XELOGI("Avatar: built component {:04X} from {:016X}",
+             xe::load_and_swap<uint16_t>(&part.record[0x10]),
              xe::load_and_swap<uint64_t>(&part.record[0]));
-      continue;
     }
-    if (part.kind != 1) {
-      // Face textures and shapes (0x819672F8) aren't built yet.
-      XELOGD("Avatar: skipping a kind {} asset", part.kind);
-      continue;
-    }
-    if (built >= kMaxParts) {
-      break;
-    }
-    uint8_t* component = TranslateVirtual(components) + built * kComponentSize;
-    if (!BuildComponent(part, blocks, component, buffers)) {
-      std::memset(component, 0, kComponentSize);
-      continue;
-    }
-    std::memcpy(TranslateVirtual(records) + built * kPartRecordSize,
-                part.record.data(), kPartRecordSize);
-    ++built;
-    StoreU32(header + 0x8, built);
-    XELOGI("Avatar: built component {:04X} from {:016X}",
-           xe::load_and_swap<uint16_t>(&part.record[0x10]),
-           xe::load_and_swap<uint64_t>(&part.record[0]));
   }
   return built ? X_E_SUCCESS : X_E_FAIL;
 }
