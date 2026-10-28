@@ -8,9 +8,14 @@
  */
 
 #include "xenia/kernel/xam/xam_avatar.h"
+
+#include <array>
+#include <cstring>
+
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/kernel/xam/xam_avatar_assets.h"
 #include "xenia/kernel/xam/xam_private.h"
 
 DEFINE_bool(allow_avatar_initialization, false,
@@ -36,6 +41,7 @@ dword_result_t XamAvatarInitialize_entry(
     return X_STATUS_SUCCESS;
   }
 
+  avatar::SetInitializeParameters(coordinate_system, unk2);
   return cvars::allow_avatar_initialization ? X_STATUS_SUCCESS : ~0u;
 }
 DECLARE_XAM_EXPORT1(XamAvatarInitialize, kAvatars, kStub);
@@ -126,38 +132,12 @@ dword_result_t XamAvatarGetManifestsByXuid_entry(
 }
 DECLARE_XAM_EXPORT1(XamAvatarGetManifestsByXuid, kAvatars, kStub)
 
-// The sizes xam's avatar app reports for the component mask (0x81965EC0):
-// a fixed part, then for each of the 13 components asked for its header,
-// 16 byte aligned, and its GPU resources, page aligned (table at 0x816332B8).
-struct AvatarComponentSizes {
-  uint32_t header;
-  uint32_t gpu_resources;
-};
-constexpr AvatarComponentSizes kAvatarComponentSizes[] = {
-    {0x800, 0x53800}, {0x400, 0x12C00}, {0x800, 0xE000}, {0x800, 0x14400},
-    {0x800, 0xF000},  {0x800, 0xD400},  {0x800, 0xA400}, {0x800, 0x6800},
-    {0x800, 0x8400},  {0x800, 0x5C00},  {0x800, 0x5800}, {0x800, 0x5C00},
-    {0x800, 0x19000},
-};
-// The fixed part holds the asset header, the skeleton and the per component
-// tables; asking for the body (bit 12) adds its skeleton and animation room.
-constexpr uint32_t kAvatarResultFixedSize = 0x1F80;
-constexpr uint32_t kAvatarResultFixedSizeWithBody = 0x3147C;
-
 dword_result_t XamAvatarGetAssetsResultSize_entry(
     dword_t avatar_component_mask, lpdword_t result_buffer_size_ptr,
     lpdword_t gpu_resource_buffer_size_ptr) {
-  const uint16_t mask = static_cast<uint16_t>(avatar_component_mask);
-  uint32_t result_size =
-      (mask & 0x1000) ? kAvatarResultFixedSizeWithBody : kAvatarResultFixedSize;
-  uint32_t gpu_resource_size = 0;
-  for (uint32_t i = 0; i < xe::countof(kAvatarComponentSizes); ++i) {
-    if (mask & (1u << i)) {
-      result_size += xe::align(kAvatarComponentSizes[i].header, 0x10u);
-      gpu_resource_size +=
-          xe::align(kAvatarComponentSizes[i].gpu_resources, 0x1000u);
-    }
-  }
+  uint32_t result_size, gpu_resource_size;
+  avatar::GetAssetsResultSize(static_cast<uint16_t>(avatar_component_mask),
+                              &result_size, &gpu_resource_size);
   if (result_buffer_size_ptr) {
     *result_buffer_size_ptr = result_size;
   }
@@ -173,25 +153,38 @@ dword_result_t XamAvatarGetAssets_entry(
     dword_t avatar_component_mask, dword_t flags, lpdword_t result_buffer_ptr,
     lpdword_t gpu_resource_buffer_ptr,
     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  // xam works on a copy of the manifest.
+  std::array<uint8_t, avatar::kManifestSize> manifest;
+  std::memcpy(
+      manifest.data(),
+      reinterpret_cast<const void*>(avatar_metadata_ptr.host_address()),
+      manifest.size());
+  X_HRESULT result = avatar::GetAssets(
+      manifest.data(), static_cast<uint16_t>(avatar_component_mask), flags,
+      result_buffer_ptr.guest_address(),
+      gpu_resource_buffer_ptr.guest_address());
   // 58410907 doesn't crash if we return failure.
   if (overlapped_ptr) {
     kernel_state()->CompleteOverlappedImmediateEx(
-        overlapped_ptr, X_ERROR_FUNCTION_FAILED, X_E_FAIL, 0);
-
+        overlapped_ptr,
+        XSUCCEEDED(result) ? X_ERROR_SUCCESS : X_ERROR_FUNCTION_FAILED,
+        result, 0);
     return X_ERROR_IO_PENDING;
   }
-
-  return X_STATUS_SUCCESS;
+  return result;
 }
-DECLARE_XAM_EXPORT1(XamAvatarGetAssets, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarGetAssets, kAvatars, kSketchy);
 
 dword_result_t XamAvatarSetCustomAsset_entry(
     dword_t buffer_size, lpdword_t asset_data_ptr, dword_t custom_color_count,
-    lpdword_t custom_colors_ptr,
+    lpdword_t custom_colors_ptr, dword_t slot_enabled,
     pointer_t<X_AVATAR_METADATA> avatar_metadata_ptr) {
-  return X_STATUS_SUCCESS;
+  return avatar::SetCustomAsset(
+      buffer_size, asset_data_ptr.guest_address(), custom_color_count,
+      custom_colors_ptr.guest_address(), slot_enabled,
+      avatar_metadata_ptr.guest_address());
 }
-DECLARE_XAM_EXPORT1(XamAvatarSetCustomAsset, kAvatars, kStub)
+DECLARE_XAM_EXPORT1(XamAvatarSetCustomAsset, kAvatars, kSketchy)
 
 dword_result_t XamAvatarSetManifest_entry(
     dword_t user_index, dword_t avatar_info_ptr,
