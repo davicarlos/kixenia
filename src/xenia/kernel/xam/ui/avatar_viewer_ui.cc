@@ -207,8 +207,10 @@ void AvatarViewerUI::Build() {
     }
     const auto& part = catalog_[group.entries[group.choice]];
     if (group.face) {
-      avatar::MakeStockId(manifest + kFaceTextures + group.slot * 0x20,
-                          part.mask, part.index, part.body_type);
+      uint8_t* record = manifest + kFaceTextures + group.slot * 0x20;
+      avatar::MakeStockId(record, part.mask, part.index, part.body_type);
+      // Face texture records end with 1.0f, as xam writes them.
+      xe::store_and_swap<float>(record + 0x10, 1.0f);
       continue;
     }
     uint16_t mask = uint16_t(part.mask);

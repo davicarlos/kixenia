@@ -17,6 +17,8 @@
 #include <array>
 #include <cmath>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <optional>
 #include <random>
@@ -24,6 +26,7 @@
 #include <vector>
 
 #include "xenia/base/byte_order.h"
+#include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/cpu/lzx.h"
@@ -32,6 +35,13 @@
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/vfs/devices/host_path_entry.h"
 #include "xenia/vfs/devices/xcontent_container_device.h"
+
+DEFINE_path(avatar_asset_package, "",
+            "The Xbox 360 system's avatar asset package "
+            "($SystemUpdate/FFFE07DF00000002 of a system update), used for "
+            "avatars instead of the AvatarAssetPack titles ship. It's what a "
+            "console uses and has more parts (props, animations).",
+            "Kernel");
 
 namespace xe {
 namespace kernel {
@@ -52,6 +62,9 @@ constexpr ComponentSizes kComponentSizes[] = {
     {0x800, 0x19000},
 };
 constexpr uint16_t kBodyComponent = 0x1000;
+// 15.0f, what 0x81967540 puts at +0x5968 of the animation (0x81613834); its
+// use isn't known yet.
+constexpr uint32_t kAnimationDefault = 0x41700000;
 
 // The fixed part holds the asset header, the skeleton and the per component
 // tables; asking for the body adds its skeleton and animation room.
@@ -114,6 +127,11 @@ struct AssetPack {
   bool loaded = false;
   std::vector<uint8_t> toc;
   uint32_t entry_count = 0;
+  // The table's layout by its version: header size, entry size and where
+  // in an entry its data's start and size are.
+  uint32_t header_size = 0x28;
+  uint32_t entry_size = 0xF8;
+  uint32_t data_field = 0xF0;
 };
 AssetPack asset_pack;
 
@@ -283,28 +301,77 @@ bool Decompress(std::span<const uint8_t> block, std::vector<uint8_t>* out) {
   return !out->empty();
 }
 
+// Versions of AvatarAssetPack.toc: 2 in the packs titles ship, 3 in the
+// system's (0x8197E238 reads both).
+constexpr uint8_t kTocVersion2[16] = {0x8A, 0x76, 0x2D, 0xF4, 0xC0, 0x67,
+                                      0x4B, 0x66, 0xB4, 0xEE, 0x56, 0x46,
+                                      0x6B, 0x1B, 0x82, 0x80};
+constexpr uint8_t kTocVersion3[16] = {0x58, 0x0A, 0x07, 0xD6, 0x4B, 0xCD,
+                                      0x40, 0xBE, 0xBF, 0x37, 0x25, 0x4B,
+                                      0xE8, 0x26, 0xFB, 0x0B};
+
+const uint8_t* PackEntry(uint32_t index) {
+  return &asset_pack.toc[asset_pack.header_size +
+                         size_t(index) * asset_pack.entry_size];
+}
+uint32_t PackDataStart(const uint8_t* entry) {
+  return load_be32(entry + asset_pack.data_field);
+}
+uint32_t PackDataSize(const uint8_t* entry) {
+  return load_be32(entry + asset_pack.data_field + 4);
+}
+
+// A host file to open the package from: the configured system package, or
+// the title's AvatarAssetPack, copied out first when it's inside a disc image.
+std::filesystem::path FindPackageFile() {
+  if (!cvars::avatar_asset_package.empty()) {
+    return cvars::avatar_asset_package;
+  }
+  auto entry =
+      kernel_state()->file_system()->ResolvePath("game:\\AvatarAssetPack");
+  if (!entry) {
+    return {};
+  }
+  if (auto host_entry = dynamic_cast<vfs::HostPathEntry*>(entry)) {
+    return host_entry->host_path();
+  }
+  vfs::File* file = nullptr;
+  if (entry->Open(vfs::FileAccess::kFileReadData, &file) != X_STATUS_SUCCESS) {
+    return {};
+  }
+  std::vector<uint8_t> data(entry->size());
+  size_t read = 0;
+  X_STATUS status = file->ReadSync(data, 0, &read);
+  file->Destroy();
+  if (status != X_STATUS_SUCCESS || read != data.size()) {
+    return {};
+  }
+  std::filesystem::path copy =
+      std::filesystem::temp_directory_path() /
+      fmt::format("xenia-avatar-asset-pack-{:08X}", kernel_state()->title_id());
+  std::ofstream out(copy, std::ios::binary | std::ios::trunc);
+  out.write(reinterpret_cast<const char*>(data.data()), data.size());
+  return out.good() ? copy : std::filesystem::path();
+}
+
 bool LoadAssetPack() {
   std::lock_guard<std::mutex> lock(pack_mutex);
   if (asset_pack.loaded) {
     return !asset_pack.toc.empty();
   }
   asset_pack.loaded = true;
-  auto entry =
-      kernel_state()->file_system()->ResolvePath("game:\\AvatarAssetPack");
-  auto host_entry = dynamic_cast<vfs::HostPathEntry*>(entry);
-  if (!host_entry) {
+  std::filesystem::path package = FindPackageFile();
+  if (package.empty()) {
     XELOGW(
-        "Avatar: game:\\AvatarAssetPack {}; avatars only get the title's own "
-        "assets",
-        entry ? "is inside a disc image" : "not found");
+        "Avatar: no avatar asset package (set avatar_asset_package or use a "
+        "title that ships AvatarAssetPack); avatars only get the title's own "
+        "assets");
     return false;
   }
   std::unique_ptr<vfs::Device> device =
-      vfs::XContentContainerDevice::CreateContentDevice(
-          "", host_entry->host_path());
+      vfs::XContentContainerDevice::CreateContentDevice("", package);
   if (!device || !device->Initialize()) {
-    XELOGE("Avatar: can't open the package {}",
-           host_entry->host_path().string());
+    XELOGE("Avatar: can't open the avatar asset package");
     return false;
   }
   auto toc_entry = device->ResolvePath("AvatarAssetPack.toc");
@@ -319,19 +386,28 @@ bool LoadAssetPack() {
   size_t read = 0;
   X_STATUS status = file->ReadSync(toc, 0, &read);
   file->Destroy();
-  if (status != X_STATUS_SUCCESS || read != toc.size() || toc.size() < 0x28) {
+  if (status != X_STATUS_SUCCESS || read != toc.size() || toc.size() < 0x30) {
     XELOGE("Avatar: can't read AvatarAssetPack.toc");
     return false;
   }
-  // Version 2 of the table: 0x28 byte header, entries of 0xF8 bytes.
+  if (!std::memcmp(toc.data(), kTocVersion3, 16)) {
+    asset_pack.header_size = 0x30;
+    asset_pack.entry_size = 0x10C;
+    asset_pack.data_field = 0x104;
+  } else if (std::memcmp(toc.data(), kTocVersion2, 16)) {
+    XELOGE("Avatar: AvatarAssetPack.toc of an unknown version");
+    return false;
+  }
   uint32_t count = load_be32(&toc[0x1C]);
-  if (0x28 + size_t(count) * 0xF8 > toc.size()) {
+  if (asset_pack.header_size + size_t(count) * asset_pack.entry_size >
+      toc.size()) {
     XELOGE("Avatar: AvatarAssetPack.toc has a bad entry count {}", count);
     return false;
   }
   asset_pack.toc = std::move(toc);
   asset_pack.entry_count = count;
-  XELOGI("Avatar: AvatarAssetPack has {} assets", count);
+  XELOGI("Avatar: AvatarAssetPack.toc version {} has {} assets",
+         asset_pack.header_size == 0x30 ? 3 : 2, count);
   return true;
 }
 
@@ -350,12 +426,12 @@ std::optional<std::span<const uint8_t>> FindAsset(const uint8_t* id) {
     if (index >= asset_pack.entry_count) {
       return std::nullopt;
     }
-    const uint8_t* entry = &toc[0x28 + size_t(index) * 0xF8];
+    const uint8_t* entry = PackEntry(index);
     if (load_be32(entry) != load_be32(id)) {
       return std::nullopt;
     }
-    uint32_t start = load_be32(entry + 0xF0);
-    uint32_t size = load_be32(entry + 0xF4);
+    uint32_t start = PackDataStart(entry);
+    uint32_t size = PackDataSize(entry);
     if (!size || size_t(start) + size > toc.size()) {
       return std::nullopt;
     }
@@ -1293,8 +1369,8 @@ uint32_t RandomHairColor(uint32_t skin) {
 // (STRB block 7: a count, then trios of colors each in 8 bytes), or black.
 std::array<uint32_t, 3> RandomPartColors(uint32_t index) {
   std::array<uint32_t, 3> colors = {0xFF000000, 0xFF000000, 0xFF000000};
-  const uint8_t* entry = &asset_pack.toc[0x28 + size_t(index) * 0xF8];
-  uint32_t start = load_be32(entry + 0xF0), size = load_be32(entry + 0xF4);
+  const uint8_t* entry = PackEntry(index);
+  uint32_t start = PackDataStart(entry), size = PackDataSize(entry);
   std::vector<StrbBlockView> blocks;
   if (!ParseStrb(std::span<const uint8_t>(&asset_pack.toc[start], size),
                  &blocks)) {
@@ -1333,7 +1409,7 @@ void RandomManifest(uint8_t* manifest, uint32_t body_type) {
                             kBodySteps[RandomBelow(xe::countof(kBodySteps))]);
 
   const auto& toc = asset_pack.toc;
-  auto entry = [&](uint32_t i) { return &toc[0x28 + size_t(i) * 0xF8]; };
+  auto entry = [&](uint32_t i) { return PackEntry(i); };
   auto entry_mask = [&](uint32_t i) { return load_be32(entry(i)); };
   auto entry_body = [&](uint32_t i) { return uint32_t(entry(i)[4]); };
   // Bit 0 of byte 6 is clear on the hair variants made to go under a hat.
@@ -1341,7 +1417,7 @@ void RandomManifest(uint8_t* manifest, uint32_t body_type) {
   auto pick = [&](auto&& wanted) -> int32_t {
     std::vector<uint32_t> candidates;
     for (uint32_t i = 0; i < asset_pack.entry_count; ++i) {
-      if (load_be32(entry(i) + 0xF4) && (entry_body(i) & body_type) &&
+      if (PackDataSize(entry(i)) && (entry_body(i) & body_type) &&
           wanted(i)) {
         candidates.push_back(i);
       }
@@ -1402,7 +1478,10 @@ void RandomManifest(uint8_t* manifest, uint32_t body_type) {
         (kinds & mask) ? pick([&](uint32_t i) { return entry_mask(i) == mask; })
                        : -1;
     if (part >= 0) {
-      write_id(manifest + kManifestTextures + slot * 0x20, uint32_t(part));
+      // A face texture record ends with 1.0f (0x8197F590 puts it there).
+      uint8_t* record = manifest + kManifestTextures + slot * 0x20;
+      write_id(record, uint32_t(part));
+      xe::store_and_swap<float>(record + 0x10, 1.0f);
     }
   }
   for (uint32_t slot = 0; slot < xe::countof(kShapeSlotMasks); ++slot) {
@@ -1462,8 +1541,8 @@ std::vector<CatalogEntry> AssetCatalog(uint32_t language) {
   }
   const auto& toc = asset_pack.toc;
   for (uint32_t i = 0; i < asset_pack.entry_count; ++i) {
-    const uint8_t* entry = &toc[0x28 + size_t(i) * 0xF8];
-    if (!load_be32(entry + 0xF4)) {
+    const uint8_t* entry = PackEntry(i);
+    if (!PackDataSize(entry)) {
       continue;
     }
     CatalogEntry part;
@@ -1649,11 +1728,6 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
   if (!result_buffer_ptr || !gpu_resource_buffer_ptr) {
     return X_E_INVALIDARG;
   }
-  if (component_mask & kBodyComponent) {
-    // The body brings the skeleton and animations (0x81966C98), not done yet.
-    XELOGW("Avatar: GetAssets for the body isn't implemented");
-    return X_E_FAIL;
-  }
   Buffers buffers{};
   GetAssetsResultSize(component_mask, &buffers.result_size,
                       &buffers.gpu_size);
@@ -1678,6 +1752,29 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
   StoreU32(header + 0x0, skeleton);
   StoreU32(header + 0xC, records);
   StoreU32(header + 0x10, components);
+  if (component_mask & kBodyComponent) {
+    // Room for a component with a skeleton of its own and its animation,
+    // laid out as 0x81967628 and 0x81967540 do. In the system's asset pack
+    // only props have one (0x1000: a sheep, a teddy bear); they're built by
+    // 0x81966C98, which isn't done here, so the room stays empty.
+    uint32_t body = buffers.Allocate(false, 0x5C, 4);
+    uint32_t body_skeleton = buffers.Allocate(false, 0x1B10, 0x10);
+    uint32_t animation = buffers.Allocate(false, 0x5990, 4);
+    uint32_t animation_data = buffers.Allocate(false, 0x28000, 4);
+    if (!body || !body_skeleton || !animation || !animation_data) {
+      return X_E_FAIL;
+    }
+    std::memset(TranslateVirtual(body), 0, 0x5C);
+    std::memset(TranslateVirtual(body_skeleton), 0, 0x1B10);
+    std::memset(TranslateVirtual(animation), 0, 0x5990);
+    StoreU32(TranslateVirtual(body_skeleton) + 4, body_skeleton + 0x10);
+    StoreU32(TranslateVirtual(body), body_skeleton);
+    StoreU32(TranslateVirtual(body) + 0x58, animation);
+    StoreU32(TranslateVirtual(animation) + 0x5968, kAnimationDefault);
+    StoreU32(TranslateVirtual(animation) + 0x5988, 0x28000);
+    StoreU32(TranslateVirtual(animation) + 0x598C, animation_data);
+    StoreU32(header + 0x4, body);
+  }
 
   // Components first, then what goes into them: face textures fill the
   // textures the head reserved (0x81969490 defers them, 0x819672F8).
@@ -1733,6 +1830,10 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
         continue;
       }
       if (built >= kMaxParts) {
+        continue;
+      }
+      if (xe::load_and_swap<uint16_t>(&part.record[0x10]) == kBodyComponent) {
+        XELOGW("Avatar: props with a skeleton (0x81966C98) aren't built");
         continue;
       }
       uint8_t* component = component_tables + built * kComponentSize;
