@@ -7,6 +7,7 @@
  ******************************************************************************
  */
 
+#include <atomic>
 #include <cfloat>
 #include <vector>
 
@@ -17,6 +18,7 @@
 #include "xenia/kernel/kinect/kinect_device.h"
 #include "xenia/kernel/nui.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/kernel/xevent.h"
 #include "xenia/kernel/xam/xam_private.h"
 #include "xenia/xbox.h"
 
@@ -110,6 +112,96 @@ dword_result_t XamVoiceSetMicArrayIdleUsers_entry(dword_t idle_users,
   return X_ERROR_SUCCESS;
 }
 DECLARE_XAM_EXPORT1(XamVoiceSetMicArrayIdleUsers, kNone, kImplemented);
+
+// The older form of XamVoiceGetMicArrayAudioEx (0x816FBCA0): the title
+// gives an event handle instead of the event, and xam fills the request's
+// words at +0x2C to +0x3C with 0, 5, 5, 5, 5 before handing it to the same
+// worker (0x81983128).
+dword_result_t XamVoiceGetMicArrayAudio_entry(lpdword_t request,
+                                              dword_t event_handle) {
+  if (!request) {
+    return X_E_INVALIDARG;
+  }
+  request[0xB] = 0;
+  for (uint32_t i = 0xC; i <= 0xF; ++i) {
+    request[i] = 5;
+  }
+  uint32_t event_ptr = 0;
+  if (event_handle) {
+    auto event = kernel_state()->object_table()->LookupObject<XEvent>(
+        event_handle);
+    if (!event) {
+      return X_STATUS_INVALID_HANDLE;
+    }
+    event_ptr = event->guest_object();
+  }
+  return kernel_state()->nui()->audio()->ReadMicrophones(
+      request.guest_address(), event_ptr);
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetMicArrayAudio, kNone, kImplemented);
+
+// 0x816FBA08: muting notes the time (0x81AACBE8) so that the chat's per user
+// talk timers (0x81AACA50) skip the muted stretch when unmuted; nothing
+// here keeps those timers, so only the status check remains.
+dword_result_t XamVoiceMuteMicArray_entry(dword_t mute) {
+  return kernel_state()->nui()->audio()->microphones_available() ? 0 : 2;
+}
+DECLARE_XAM_EXPORT1(XamVoiceMuteMicArray, kNone, kSketchy);
+
+// Headsets on controllers go through the kernel's XVoiced driver
+// (XVoicedGetDirectionalData, 0x327, and the battery query); there are
+// none, so they report no device.
+dword_result_t XamVoiceGetDirectionalData_entry(dword_t unknown,
+                                                lpvoid_t data) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetDirectionalData, kNone, kImplemented);
+
+dword_result_t XamVoiceGetBatteryStatus_entry(dword_t user_index,
+                                              lpvoid_t status) {
+  return X_ERROR_DEVICE_NOT_CONNECTED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetBatteryStatus, kNone, kImplemented);
+
+// 0x816FBB28: caches, for each of the four users, a voice level from the
+// sign-in state and the privileges 0xFC and 0xFB (0 signed out, 10 signed
+// in, 0x1E or 0x14 by the privileges); it's read back by xam's own chat
+// code, which isn't here.
+void XamVoiceRecordUserPrivileges_entry() {}
+DECLARE_XAM_EXPORT1(XamVoiceRecordUserPrivileges, kNone, kImplemented);
+
+// 0x817F8C80: swaps the routine xam calls with captured audio (0x81AD1264)
+// and returns the previous one.
+dword_result_t XamVoiceSetAudioCaptureRoutine_entry(dword_t routine) {
+  static std::atomic<uint32_t> capture_routine{0};
+  return capture_routine.exchange(routine);
+}
+DECLARE_XAM_EXPORT1(XamVoiceSetAudioCaptureRoutine, kNone, kImplemented);
+
+// 0x816FBE10: xam's localized string 100, the microphone array's name in
+// the title's language; here always English.
+dword_result_t XamVoiceGetMicArrayFilenameDesc_entry() {
+  static uint32_t name_ptr = 0;
+  if (!name_ptr) {
+    static const char16_t kName[] = u"Kinect Sensor Microphone Array";
+    name_ptr = kernel_memory()->SystemHeapAlloc(sizeof(kName));
+    auto* out = kernel_memory()->TranslateVirtual<uint8_t*>(name_ptr);
+    for (size_t i = 0; i < xe::countof(kName); ++i) {
+      xe::store_and_swap<uint16_t>(out + i * 2, uint16_t(kName[i]));
+    }
+  }
+  return name_ptr;
+}
+DECLARE_XAM_EXPORT1(XamVoiceGetMicArrayFilenameDesc, kNone, kSketchy);
+
+// 0x816C3750: shows the system's dialog 0x2100E asking to turn the
+// microphone array off (an 0x88 byte request with 0xD as its first word)
+// and returns what the dialog answers, 5 when it can't be shown. No dialog
+// here: the array stays as it is.
+dword_result_t XamVoiceDisableMicArray_entry(dword_t user_index) {
+  return X_ERROR_ACCESS_DENIED;
+}
+DECLARE_XAM_EXPORT1(XamVoiceDisableMicArray, kNone, kSketchy);
 
 }  // namespace xam
 }  // namespace kernel
