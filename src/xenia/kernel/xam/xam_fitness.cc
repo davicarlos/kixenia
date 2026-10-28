@@ -622,6 +622,15 @@ dword_result_t XamFitnessCreateFitnessEventEnumerator_entry(dword_t user_index,
 }
 DECLARE_XAM_EXPORT1(XamFitnessCreateFitnessEventEnumerator, kNone, kSketchy);
 
+// Waits for the records xam sent to the service without waiting for an
+// answer (the Guide's fitness app calls it after saving); everything here
+// is written at once.
+dword_result_t XampFitnessLetFireAndForgetsCatchUpInternal_entry() {
+  return X_E_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XampFitnessLetFireAndForgetsCatchUpInternal, kNone,
+                    kImplemented);
+
 }  // namespace xam
 }  // namespace kernel
 }  // namespace xe

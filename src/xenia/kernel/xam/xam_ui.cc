@@ -1078,6 +1078,31 @@ dword_result_t XamShowFitnessWarnAboutPrivacyUI_entry(dword_t unk,
 }
 DECLARE_XAM_EXPORT1(XamShowFitnessWarnAboutPrivacyUI, kUI, kSketchy);
 
+// Warns the player about the time a workout takes (UI 0x2103B,
+// 0x816C5CC8); shown the same way as the privacy warning, so it only
+// checks the user here.
+dword_result_t XamShowFitnessWarnAboutTimeUI_entry(dword_t unk,
+                                                   dword_t user_index,
+                                                   dword_t unk2) {
+  if (user_index >= XUserMaxUserCount) {
+    return X_E_INVALIDARG;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowFitnessWarnAboutTimeUI, kUI, kSketchy);
+
+// The Guide's "clear fitness data" screen (UI 0x21040, 0x816C5BD8), which
+// asks and then calls XamFitnessClearAll. No screen here, so nothing is
+// cleared: the player keeps the data unless the title clears it.
+dword_result_t XamShowFitnessClearUI_entry(dword_t unk, dword_t user_index,
+                                           dword_t unk2) {
+  if (user_index >= XUserMaxUserCount) {
+    return X_E_INVALIDARG;
+  }
+  return X_ERROR_SUCCESS;
+}
+DECLARE_XAM_EXPORT1(XamShowFitnessClearUI, kUI, kStub);
+
 dword_result_t XamShowSigninUI_entry(dword_t users_needed, dword_t flags) {
   return xeXamShowSigninUI(XUserIndexAny, users_needed, flags);
 }
