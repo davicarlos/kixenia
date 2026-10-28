@@ -54,13 +54,34 @@ class AvatarViewerUI final : public XamGamepadDialog {
     std::vector<size_t> entries;  // Into catalog_.
     int choice = 0;               // Into entries, -1 for none.
   };
-  struct Triangle {
-    std::array<float, 9> vertices;
-    uint32_t color;
+  static constexpr uint32_t kMaxUvSets = 7;
+  struct Vertex {
+    float position[3];
+    float normal[3];
+    float uv[kMaxUvSets][2];
+  };
+  // A material subset of type 1: the whole mesh drawn once more with a
+  // texture, through one of its UV sets, over what's under it.
+  struct Layer {
+    uint32_t id;
+    uint32_t texture;  // Into textures_.
+    uint32_t uv_set;
+    uint32_t flags;
+  };
+  struct Mesh {
+    std::vector<Vertex> vertices;
+    std::vector<uint16_t> indices;
+    std::vector<Layer> layers;
+    // The colors the manifest painted, by subset id.
+    std::vector<std::pair<uint32_t, uint32_t>> colors;
+    uint32_t base_color;
   };
   struct Texture {
     std::string label;
     uint32_t format, width, height, slices, slice_size, data;
+    // The current frame, decoded, for sampling.
+    std::vector<uint8_t> rgba;
+    uint32_t rgba_width = 0, rgba_height = 0;
   };
 
   void FillGroups();
@@ -84,7 +105,8 @@ class AvatarViewerUI final : public XamGamepadDialog {
 
   uint32_t result_buffer_ = 0;
   uint32_t gpu_buffer_ = 0;
-  std::vector<Triangle> triangles_;
+  std::vector<Mesh> meshes_;
+  size_t triangle_count_ = 0;
   std::array<float, 3> center_ = {};
   float radius_ = 1.0f;
   std::vector<Texture> textures_;
@@ -93,6 +115,9 @@ class AvatarViewerUI final : public XamGamepadDialog {
   float pitch_ = 0.0f;
   float zoom_ = 1.0f;
   int frame_ = 0;
+  bool textured_ = true;
+  bool tinted_ = true;
+  bool smooth_ = true;
   bool view_dirty_ = true;
   bool textures_dirty_ = true;
   std::vector<uint8_t> view_rgba_;

@@ -183,7 +183,8 @@ void AvatarViewerUI::Build() {
   dirty_ = false;
   view_dirty_ = true;
   textures_dirty_ = true;
-  triangles_.clear();
+  meshes_.clear();
+  triangle_count_ = 0;
   textures_.clear();
   FreeBuffers();
 
@@ -261,6 +262,7 @@ void AvatarViewerUI::ReadResult(uint32_t result) {
                              std::numeric_limits<float>::max(),
                              std::numeric_limits<float>::max()};
   std::array<float, 3> hi = {-lo[0], -lo[1], -lo[2]};
+  triangle_count_ = 0;
   for (uint32_t c = 0; c < count; ++c) {
     uint32_t component = components + c * 0x34;
     uint16_t index = xe::load_and_swap<uint16_t>(
@@ -272,61 +274,12 @@ void AvatarViewerUI::ReadResult(uint32_t result) {
         break;
       }
     }
-    uint32_t meshes = Load32(component + 0x14);
-    uint32_t mesh_base = Load32(component + 0x2C);
-    for (uint32_t m = 0; m < meshes; ++m) {
-      uint32_t mesh = mesh_base + m * 0x200;
-      uint32_t triangles = Load32(mesh + 0x1E4);
-      uint32_t stride = Load32(mesh + 0x1F0);
-      const uint8_t* vertices =
-          memory->TranslateVirtual<uint8_t*>(Load32(mesh + 0x1F8));
-      const uint8_t* indices =
-          memory->TranslateVirtual<uint8_t*>(Load32(mesh + 0x1FC));
-      uint32_t vertex_count = Load32(mesh + 0x1E8);
-      // The mesh's first painted color, or the clothes color.
-      uint32_t color = ToArgb(clothes_);
-      for (uint32_t s = 0; s < 20; ++s) {
-        uint32_t subset = mesh + 4 + s * 0x18;
-        if (Load32(subset) == 1 || !Load32(subset + 4)) {
-          continue;
-        }
-        std::array<float, 3> rgb;
-        for (uint32_t k = 0; k < 3; ++k) {
-          rgb[k] = xe::load_and_swap<float>(
-              memory->TranslateVirtual<uint8_t*>(subset + 8 + k * 4));
-        }
-        if (rgb[0] + rgb[1] + rgb[2] > 0.0f) {
-          color = ToArgb(rgb);
-          break;
-        }
-      }
-      for (uint32_t t = 0; t < triangles; ++t) {
-        Triangle triangle;
-        triangle.color = color;
-        bool valid = true;
-        for (uint32_t k = 0; k < 3; ++k) {
-          uint32_t v = xe::load_and_swap<uint16_t>(indices + (t * 3 + k) * 2);
-          if (v >= vertex_count) {
-            valid = false;
-            break;
-          }
-          for (uint32_t a = 0; a < 3; ++a) {
-            float value =
-                xe::load_and_swap<float>(vertices + v * stride + a * 4);
-            triangle.vertices[k * 3 + a] = value;
-            lo[a] = std::min(lo[a], value);
-            hi[a] = std::max(hi[a], value);
-          }
-        }
-        if (valid) {
-          triangles_.push_back(triangle);
-        }
-      }
-    }
+    // The component's textures come first, so its layers can point at them.
+    uint32_t texture_base = uint32_t(textures_.size());
     uint32_t texture_count = Load32(component + 0x18);
-    uint32_t texture_base = Load32(component + 0x30);
+    uint32_t texture_records = Load32(component + 0x30);
     for (uint32_t t = 0; t < texture_count; ++t) {
-      uint32_t record = texture_base + t * 0x2C;
+      uint32_t record = texture_records + t * 0x2C;
       Texture texture;
       texture.format = Load32(record);
       texture.width = Load32(record + 4);
@@ -335,13 +288,99 @@ void AvatarViewerUI::ReadResult(uint32_t result) {
       texture.slice_size = Load32(record + 0x14);
       texture.data = Load32(record + 0x24);
       texture.label = name + " #" + std::to_string(t);
-      if (texture.data && texture.width && texture.height &&
-          texture.width <= 1024 && texture.height <= 1024) {
-        textures_.push_back(texture);
+      if (!texture.data || !texture.width || !texture.height ||
+          texture.width > 1024 || texture.height > 1024) {
+        texture.data = 0;
       }
+      textures_.push_back(texture);
+    }
+
+    uint32_t meshes = Load32(component + 0x14);
+    uint32_t mesh_base = Load32(component + 0x2C);
+    for (uint32_t m = 0; m < meshes; ++m) {
+      uint32_t mesh_record = mesh_base + m * 0x200;
+      uint32_t triangles = Load32(mesh_record + 0x1E4);
+      uint32_t vertex_count = Load32(mesh_record + 0x1E8);
+      uint32_t vertex_type = Load32(mesh_record + 0x1EC);
+      uint32_t stride = Load32(mesh_record + 0x1F0);
+      const uint8_t* vertices =
+          memory->TranslateVirtual<uint8_t*>(Load32(mesh_record + 0x1F8));
+      const uint8_t* indices =
+          memory->TranslateVirtual<uint8_t*>(Load32(mesh_record + 0x1FC));
+      if (vertex_type < 1 || vertex_type > kMaxUvSets ||
+          stride != 0x1C + 4 * vertex_type) {
+        continue;
+      }
+      Mesh mesh;
+      mesh.base_color = ToArgb(clothes_);
+      for (uint32_t s = 0; s < 20; ++s) {
+        uint32_t subset = mesh_record + 4 + s * 0x18;
+        uint32_t type = Load32(subset);
+        uint32_t id = Load32(subset + 4);
+        if (!id) {
+          continue;
+        }
+        if (type == 1) {
+          Layer layer;
+          layer.id = id;
+          layer.texture = texture_base + xe::load_and_swap<uint16_t>(
+                                             memory->TranslateVirtual<uint8_t*>(
+                                                 subset + 8));
+          layer.uv_set = xe::load_and_swap<uint16_t>(
+              memory->TranslateVirtual<uint8_t*>(subset + 0xA));
+          layer.flags = Load32(subset + 0xC);
+          mesh.layers.push_back(layer);
+          continue;
+        }
+        std::array<float, 3> rgb;
+        for (uint32_t k = 0; k < 3; ++k) {
+          rgb[k] = xe::load_and_swap<float>(
+              memory->TranslateVirtual<uint8_t*>(subset + 8 + k * 4));
+        }
+        mesh.colors.push_back({id, ToArgb(rgb)});
+        if (rgb[0] + rgb[1] + rgb[2] > 0.0f &&
+            mesh.base_color == ToArgb(clothes_)) {
+          mesh.base_color = ToArgb(rgb);
+        }
+      }
+      mesh.vertices.resize(vertex_count);
+      for (uint32_t v = 0; v < vertex_count; ++v) {
+        const uint8_t* in = vertices + size_t(v) * stride;
+        Vertex& out = mesh.vertices[v];
+        for (uint32_t a = 0; a < 3; ++a) {
+          out.position[a] = xe::load_and_swap<float>(in + a * 4);
+          lo[a] = std::min(lo[a], out.position[a]);
+          hi[a] = std::max(hi[a], out.position[a]);
+        }
+        // The normal is 11:11:10 signed (HEND3N): x low, z high.
+        uint32_t packed = xe::load_and_swap<uint32_t>(in + 0xC);
+        auto part = [&](uint32_t shift, uint32_t bits) {
+          int32_t value = int32_t(packed << (32 - shift - bits)) >> (32 - bits);
+          return float(value) / float((1u << (bits - 1)) - 1);
+        };
+        out.normal[0] = part(0, 11);
+        out.normal[1] = part(11, 11);
+        out.normal[2] = part(22, 10);
+        for (uint32_t set = 0; set < kMaxUvSets; ++set) {
+          for (uint32_t k = 0; k < 2; ++k) {
+            out.uv[set][k] =
+                set < vertex_type
+                    ? xe::xenos_half_to_float(xe::load_and_swap<uint16_t>(
+                          in + 0x1C + (set * 2 + k) * 2))
+                    : 0.0f;
+          }
+        }
+      }
+      mesh.indices.reserve(size_t(triangles) * 3);
+      for (uint32_t i = 0; i < triangles * 3; ++i) {
+        uint16_t v = xe::load_and_swap<uint16_t>(indices + i * 2);
+        mesh.indices.push_back(v < vertex_count ? v : 0);
+      }
+      triangle_count_ += triangles;
+      meshes_.push_back(std::move(mesh));
     }
   }
-  if (triangles_.empty()) {
+  if (!triangle_count_) {
     status_ = "Built " + std::to_string(count) + " components, no meshes.";
     return;
   }
@@ -351,92 +390,233 @@ void AvatarViewerUI::ReadResult(uint32_t result) {
     radius_ = std::max(radius_, (hi[a] - lo[a]) * 0.5f);
   }
   status_ = "Built " + std::to_string(count) + " components, " +
-            std::to_string(triangles_.size()) + " triangles, " +
+            std::to_string(triangle_count_) + " triangles, " +
             std::to_string(textures_.size()) + " textures.";
 }
 
-// Draws the triangles with a depth buffer, lit by their face normals.
+namespace {
+
+constexpr uint32_t kSupersample = 2;
+
+// A texel of a decoded texture, bilinear, with wrap addressing.
+std::array<float, 4> Sample(const std::vector<uint8_t>& rgba, uint32_t width,
+                            uint32_t height, float u, float v) {
+  float x = u * float(width) - 0.5f, y = v * float(height) - 0.5f;
+  float fx = std::floor(x), fy = std::floor(y);
+  float tx = x - fx, ty = y - fy;
+  auto texel = [&](int32_t px, int32_t py) {
+    px = ((px % int32_t(width)) + int32_t(width)) % int32_t(width);
+    py = ((py % int32_t(height)) + int32_t(height)) % int32_t(height);
+    return &rgba[(size_t(py) * width + px) * 4];
+  };
+  const uint8_t* p[4] = {texel(int32_t(fx), int32_t(fy)),
+                         texel(int32_t(fx) + 1, int32_t(fy)),
+                         texel(int32_t(fx), int32_t(fy) + 1),
+                         texel(int32_t(fx) + 1, int32_t(fy) + 1)};
+  std::array<float, 4> out;
+  for (uint32_t c = 0; c < 4; ++c) {
+    out[c] = (p[0][c] * (1 - tx) + p[1][c] * tx) * (1 - ty) +
+             (p[2][c] * (1 - tx) + p[3][c] * tx) * ty;
+    out[c] /= 255.0f;
+  }
+  return out;
+}
+
+}  // namespace
+
+// Draws the meshes into a depth buffered image at kSupersample times the
+// view, lit by their vertex normals, each layer's texture over the one below
+// it, then scales it down to the view.
 void AvatarViewerUI::Render() {
   view_dirty_ = false;
-  view_rgba_.assign(size_t(kViewWidth) * kViewHeight * 4, 0);
-  for (size_t i = 0; i < view_rgba_.size(); i += 4) {
-    view_rgba_[i] = 32;
-    view_rgba_[i + 1] = 34;
-    view_rgba_[i + 2] = 40;
-    view_rgba_[i + 3] = 255;
+  const uint32_t width = kViewWidth * kSupersample;
+  const uint32_t height = kViewHeight * kSupersample;
+  std::vector<float> color(size_t(width) * height * 3, 0.0f);
+  for (size_t i = 0; i < color.size(); i += 3) {
+    color[i] = 32.0f;
+    color[i + 1] = 34.0f;
+    color[i + 2] = 40.0f;
   }
-  depth_.assign(size_t(kViewWidth) * kViewHeight,
-                -std::numeric_limits<float>::max());
-  if (triangles_.empty() || radius_ <= 0.0f) {
-    return;
-  }
-  float cy = std::cos(yaw_), sy = std::sin(yaw_);
-  float cp = std::cos(pitch_), sp = std::sin(pitch_);
-  // The avatar's largest extent fills nine tenths of the view's height.
-  float scale = 0.45f * float(kViewHeight) / radius_ * zoom_;
-  auto transform = [&](const float* p, float* out) {
-    float x = p[0] - center_[0], y = p[1] - center_[1], z = p[2] - center_[2];
-    float x1 = x * cy + z * sy, z1 = -x * sy + z * cy;
-    float y1 = y * cp - z1 * sp, z2 = y * sp + z1 * cp;
-    out[0] = float(kViewWidth) * 0.5f + x1 * scale;
-    out[1] = float(kViewHeight) * 0.5f - y1 * scale;
-    out[2] = z2 * scale;
-  };
-  for (const auto& triangle : triangles_) {
-    float p[3][3];
-    for (uint32_t k = 0; k < 3; ++k) {
-      transform(&triangle.vertices[k * 3], p[k]);
-    }
-    float ux = p[1][0] - p[0][0], uy = p[1][1] - p[0][1],
-          uz = p[1][2] - p[0][2];
-    float vx = p[2][0] - p[0][0], vy = p[2][1] - p[0][1],
-          vz = p[2][2] - p[0][2];
-    // The face normal in view space (pixels, y down), turned to the viewer,
-    // lit from above, the left and the front.
-    float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz,
-          nz = ux * vy - uy * vx;
-    float length = std::sqrt(nx * nx + ny * ny + nz * nz);
-    float light = 0.25f;
-    if (length > 0.0f) {
-      if (nz < 0.0f) {
-        nx = -nx, ny = -ny, nz = -nz;
+  depth_.assign(size_t(width) * height, -std::numeric_limits<float>::max());
+  view_rgba_.assign(size_t(kViewWidth) * kViewHeight * 4, 255);
+
+  if (triangle_count_ && radius_ > 0.0f) {
+    float cy = std::cos(yaw_), sy = std::sin(yaw_);
+    float cp = std::cos(pitch_), sp = std::sin(pitch_);
+    // The avatar's largest extent fills nine tenths of the view's height.
+    float scale = 0.45f * float(height) / radius_ * zoom_;
+    auto rotate = [&](const float* p, float* out) {
+      float x1 = p[0] * cy + p[2] * sy, z1 = -p[0] * sy + p[2] * cy;
+      out[0] = x1;
+      out[1] = p[1] * cp - z1 * sp;
+      out[2] = p[1] * sp + z1 * cp;
+    };
+    struct Projected {
+      float x, y, z, light;
+    };
+    const float light_dir[3] = {-0.35f, 0.5f, 0.8f};  // Up, left, front.
+    std::vector<Projected> projected;
+    for (const auto& mesh : meshes_) {
+      projected.resize(mesh.vertices.size());
+      for (size_t v = 0; v < mesh.vertices.size(); ++v) {
+        const Vertex& vertex = mesh.vertices[v];
+        float p[3] = {vertex.position[0] - center_[0],
+                      vertex.position[1] - center_[1],
+                      vertex.position[2] - center_[2]};
+        float r[3], n[3];
+        rotate(p, r);
+        rotate(vertex.normal, n);
+        float facing = n[0] * light_dir[0] + n[1] * light_dir[1] +
+                       n[2] * light_dir[2];
+        projected[v] = {float(width) * 0.5f + r[0] * scale,
+                        float(height) * 0.5f - r[1] * scale, r[2] * scale,
+                        0.3f + 0.7f * std::clamp(facing, 0.0f, 1.0f)};
       }
-      float facing = (-0.35f * nx - 0.5f * ny + 0.8f * nz) / (length * 1.0055f);
-      light += 0.75f * std::max(facing, 0.0f);
-    }
-    uint8_t rgb[3] = {uint8_t(((triangle.color >> 16) & 0xFF) * light),
-                      uint8_t(((triangle.color >> 8) & 0xFF) * light),
-                      uint8_t((triangle.color & 0xFF) * light)};
-    float area = ux * vy - uy * vx;
-    if (std::abs(area) < 1e-6f) {
-      continue;
-    }
-    int x0 =
-        std::max(0, int(std::floor(std::min({p[0][0], p[1][0], p[2][0]}))));
-    int x1 = std::min(int(kViewWidth) - 1,
-                      int(std::ceil(std::max({p[0][0], p[1][0], p[2][0]}))));
-    int y0 =
-        std::max(0, int(std::floor(std::min({p[0][1], p[1][1], p[2][1]}))));
-    int y1 = std::min(int(kViewHeight) - 1,
-                      int(std::ceil(std::max({p[0][1], p[1][1], p[2][1]}))));
-    for (int y = y0; y <= y1; ++y) {
-      for (int x = x0; x <= x1; ++x) {
-        float px = float(x) + 0.5f, py = float(y) + 0.5f;
-        float w0 = ((p[1][0] - px) * (p[2][1] - py) -
-                    (p[1][1] - py) * (p[2][0] - px)) / area;
-        float w1 = ((p[2][0] - px) * (p[0][1] - py) -
-                    (p[2][1] - py) * (p[0][0] - px)) / area;
-        float w2 = 1.0f - w0 - w1;
-        if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+      // Without textures (or layers) the mesh is drawn once in its color.
+      std::vector<Layer> layers = mesh.layers;
+      if (!textured_ || layers.empty()) {
+        layers.assign(1, Layer{0, UINT32_MAX, 0, 0});
+      }
+      uint32_t tint = 0xFFFFFFFF;
+      if (tinted_) {
+        // The skin color (0x1B) for bodies, the first clothes color for the
+        // rest: what the manifest painted on the mesh.
+        for (const auto& [id, value] : mesh.colors) {
+          if (id == 0x1B || id == 0x16) {
+            tint = value;
+            if (id == 0x16) {
+              break;
+            }
+          }
+        }
+      }
+      for (size_t layer_index = 0; layer_index < layers.size();
+           ++layer_index) {
+        const Layer& layer = layers[layer_index];
+        const Texture* texture =
+            layer.texture < textures_.size() ? &textures_[layer.texture]
+                                             : nullptr;
+        if (texture && texture->rgba.empty()) {
           continue;
         }
-        float z = w0 * p[0][2] + w1 * p[1][2] + w2 * p[2][2];
-        size_t pixel = size_t(y) * kViewWidth + x;
-        if (z <= depth_[pixel]) {
-          continue;
+        bool base = layer_index == 0;
+        uint32_t flat = texture ? 0xFFFFFFFF : mesh.base_color;
+        if (base && textured_ && !texture) {
+          flat = mesh.base_color;
         }
-        depth_[pixel] = z;
-        std::memcpy(&view_rgba_[pixel * 4], rgb, 3);
+        float flat_rgb[3] = {float((flat >> 16) & 0xFF) / 255.0f,
+                             float((flat >> 8) & 0xFF) / 255.0f,
+                             float(flat & 0xFF) / 255.0f};
+        float tint_rgb[3] = {float((tint >> 16) & 0xFF) / 255.0f,
+                             float((tint >> 8) & 0xFF) / 255.0f,
+                             float(tint & 0xFF) / 255.0f};
+        for (size_t t = 0; t + 2 < mesh.indices.size(); t += 3) {
+          const Projected* p[3] = {&projected[mesh.indices[t]],
+                                   &projected[mesh.indices[t + 1]],
+                                   &projected[mesh.indices[t + 2]]};
+          const Vertex* v[3] = {&mesh.vertices[mesh.indices[t]],
+                                &mesh.vertices[mesh.indices[t + 1]],
+                                &mesh.vertices[mesh.indices[t + 2]]};
+          float area = (p[1]->x - p[0]->x) * (p[2]->y - p[0]->y) -
+                       (p[1]->y - p[0]->y) * (p[2]->x - p[0]->x);
+          if (std::abs(area) < 1e-6f) {
+            continue;
+          }
+          float min_x = std::min({p[0]->x, p[1]->x, p[2]->x});
+          float max_x = std::max({p[0]->x, p[1]->x, p[2]->x});
+          float min_y = std::min({p[0]->y, p[1]->y, p[2]->y});
+          float max_y = std::max({p[0]->y, p[1]->y, p[2]->y});
+          int x0 = std::max(0, int(std::floor(min_x)));
+          int x1 = std::min(int(width) - 1, int(std::ceil(max_x)));
+          int y0 = std::max(0, int(std::floor(min_y)));
+          int y1 = std::min(int(height) - 1, int(std::ceil(max_y)));
+          float flat_light = 0.0f;
+          if (!smooth_) {
+            float ux = p[1]->x - p[0]->x, uy = p[1]->y - p[0]->y,
+                  uz = p[1]->z - p[0]->z;
+            float vx = p[2]->x - p[0]->x, vy = p[2]->y - p[0]->y,
+                  vz = p[2]->z - p[0]->z;
+            float nx = uy * vz - uz * vy, ny = uz * vx - ux * vz,
+                  nz = ux * vy - uy * vx;
+            float length = std::sqrt(nx * nx + ny * ny + nz * nz);
+            if (length > 0.0f) {
+              if (nz < 0.0f) {
+                nx = -nx, ny = -ny, nz = -nz;
+              }
+              // Screen y points down, so the light's y flips.
+              flat_light = (nx * light_dir[0] - ny * light_dir[1] +
+                            nz * light_dir[2]) / length;
+            }
+            flat_light = 0.3f + 0.7f * std::max(flat_light, 0.0f);
+          }
+          for (int y = y0; y <= y1; ++y) {
+            for (int x = x0; x <= x1; ++x) {
+              float px = float(x) + 0.5f, py = float(y) + 0.5f;
+              float w0 = ((p[1]->x - px) * (p[2]->y - py) -
+                          (p[1]->y - py) * (p[2]->x - px)) / area;
+              float w1 = ((p[2]->x - px) * (p[0]->y - py) -
+                          (p[2]->y - py) * (p[0]->x - px)) / area;
+              float w2 = 1.0f - w0 - w1;
+              if (w0 < 0.0f || w1 < 0.0f || w2 < 0.0f) {
+                continue;
+              }
+              float z = w0 * p[0]->z + w1 * p[1]->z + w2 * p[2]->z;
+              size_t pixel = size_t(y) * width + x;
+              // The base layer writes depth; the others only go over it.
+              if (base ? z <= depth_[pixel] : z < depth_[pixel] - 0.01f) {
+                continue;
+              }
+              float light = smooth_ ? w0 * p[0]->light + w1 * p[1]->light +
+                                          w2 * p[2]->light
+                                    : flat_light;
+              std::array<float, 4> texel = {flat_rgb[0], flat_rgb[1],
+                                            flat_rgb[2], 1.0f};
+              if (texture) {
+                uint32_t set = std::min(layer.uv_set, kMaxUvSets - 1);
+                float u = w0 * v[0]->uv[set][0] + w1 * v[1]->uv[set][0] +
+                          w2 * v[2]->uv[set][0];
+                float vv = w0 * v[0]->uv[set][1] + w1 * v[1]->uv[set][1] +
+                           w2 * v[2]->uv[set][1];
+                texel = Sample(texture->rgba, texture->rgba_width,
+                               texture->rgba_height, u, vv);
+                if (base) {
+                  texel[3] = 1.0f;
+                  for (uint32_t c = 0; c < 3; ++c) {
+                    texel[c] *= tint_rgb[c];
+                  }
+                }
+              }
+              if (base) {
+                depth_[pixel] = z;
+              }
+              float* dst = &color[pixel * 3];
+              for (uint32_t c = 0; c < 3; ++c) {
+                float lit = texel[c] * 255.0f * light;
+                dst[c] = dst[c] * (1.0f - texel[3]) + lit * texel[3];
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  for (uint32_t y = 0; y < kViewHeight; ++y) {
+    for (uint32_t x = 0; x < kViewWidth; ++x) {
+      float sum[3] = {};
+      for (uint32_t sy = 0; sy < kSupersample; ++sy) {
+        for (uint32_t sx = 0; sx < kSupersample; ++sx) {
+          const float* src =
+              &color[((size_t(y) * kSupersample + sy) * width +
+                      x * kSupersample + sx) * 3];
+          for (uint32_t c = 0; c < 3; ++c) {
+            sum[c] += src[c];
+          }
+        }
+      }
+      uint8_t* dst = &view_rgba_[(size_t(y) * kViewWidth + x) * 4];
+      for (uint32_t c = 0; c < 3; ++c) {
+        dst[c] = uint8_t(std::clamp(sum[c] / (kSupersample * kSupersample),
+                                    0.0f, 255.0f));
       }
     }
   }
@@ -457,8 +637,14 @@ void AvatarViewerUI::UpdateTextureImages() {
     }
   }
   texture_images_.clear();
+  view_dirty_ = true;
   auto* memory = kernel_memory();
-  for (const auto& texture : textures_) {
+  for (auto& texture : textures_) {
+    if (!texture.data) {
+      texture.rgba.clear();
+      texture_images_.push_back(nullptr);
+      continue;
+    }
     bool dxt5 = (texture.format & 0x3F) != 0x12;
     uint32_t block_bytes = dxt5 ? 16 : 8;
     uint32_t blocks_wide = std::max(texture.width / 4, 1u);
@@ -488,6 +674,9 @@ void AvatarViewerUI::UpdateTextureImages() {
     }
     texture_images_.push_back(
         MakeImage(blocks_wide * 4, blocks_high * 4, rgba));
+    texture.rgba = std::move(rgba);
+    texture.rgba_width = blocks_wide * 4;
+    texture.rgba_height = blocks_high * 4;
   }
 }
 
@@ -592,6 +781,11 @@ void AvatarViewerUI::OnDraw(ImGuiIO& io) {
       view_dirty_ = true;
     }
     ImGui::TextUnformatted("Drag to turn, wheel to zoom.");
+    view_dirty_ |= ImGui::Checkbox("Textures", &textured_);
+    ImGui::SameLine();
+    view_dirty_ |= ImGui::Checkbox("Tint", &tinted_);
+    ImGui::SameLine();
+    view_dirty_ |= ImGui::Checkbox("Smooth", &smooth_);
     if (ImGui::Button("Front")) {
       yaw_ = pitch_ = 0.0f;
       zoom_ = 1.0f;
