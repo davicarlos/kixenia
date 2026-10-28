@@ -10,6 +10,8 @@
 #include "xenia/kernel/xam/content_manager.h"
 
 #include <algorithm>
+#include <fstream>
+#include <vector>
 
 #include "third_party/fmt/include/fmt/format.h"
 #include "xenia/base/filesystem.h"
@@ -609,22 +611,44 @@ X_RESULT ContentManager::OpenContentFromGuestFile(
     return X_ERROR_FILE_NOT_FOUND;
   }
 
-  // The package device reads the file from the host, so the entry must come
-  // from a host directory (a game extracted to a folder).
-  // TODO(knuckleslee): Map entries of disc images into memory, as loading a
-  // module from a disc does.
-  auto host_entry = dynamic_cast<vfs::HostPathEntry*>(entry);
-  if (!host_entry) {
-    XELOGE(
-        "{}: {} is inside a disc image; opening packages from disc images is "
-        "not supported yet",
-        __func__, guest_path);
-    return X_ERROR_FILE_NOT_FOUND;
+  // The package device reads the file from the host: straight from a game
+  // extracted to a folder, or from a copy when the file is inside a disc
+  // image or a container (Kinect titles in GoD and XBLA packages open their
+  // Kinect ID database, Database.xmplr, this way).
+  std::filesystem::path package_path;
+  if (auto host_entry = dynamic_cast<vfs::HostPathEntry*>(entry)) {
+    package_path = host_entry->host_path();
+  } else {
+    vfs::File* file = nullptr;
+    if (entry->Open(vfs::FileAccess::kFileReadData, &file) !=
+        X_STATUS_SUCCESS) {
+      XELOGE("{}: can't read {} out of its image", __func__, guest_path);
+      return X_ERROR_FILE_NOT_FOUND;
+    }
+    std::vector<uint8_t> contents(entry->size());
+    size_t read = 0;
+    X_STATUS status = file->ReadSync(contents, 0, &read);
+    file->Destroy();
+    if (status != X_STATUS_SUCCESS || read != contents.size()) {
+      XELOGE("{}: can't read {} out of its image", __func__, guest_path);
+      return X_ERROR_FILE_NOT_FOUND;
+    }
+    package_path = std::filesystem::temp_directory_path() /
+                   fmt::format("xenia-package-{:08X}-{}",
+                               kernel_state_->title_id(), root_name);
+    std::ofstream out(package_path, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(contents.data()),
+              contents.size());
+    if (!out.good()) {
+      XELOGE("{}: can't copy {} out of its image", __func__, guest_path);
+      return X_ERROR_FILE_NOT_FOUND;
+    }
+    XELOGI("{}: {} copied out of its image to open it", __func__, guest_path);
   }
 
   XCONTENT_AGGREGATE_DATA data = {};
   auto package = std::make_unique<ContentPackage>(kernel_state_, root_name,
-                                                  data, host_entry->host_path());
+                                                  data, package_path);
   if (!package->is_mounted()) {
     XELOGE("{}: Cannot mount {} as {}", __func__, guest_path, root_name);
     return X_ERROR_FILE_NOT_FOUND;
