@@ -119,10 +119,59 @@ AvatarViewerUI::AvatarViewerUI(xe::ui::ImGuiDrawer* imgui_drawer,
                                xe::hid::InputSystem* input_system)
     : XamGamepadDialog(imgui_drawer, input_system) {
   catalog_ = avatar::AssetCatalog(uint32_t(cvars::user_language));
+  meshes_ = std::make_shared<std::vector<Mesh>>();
   FillGroups();
+  render_thread_ = std::thread([this]() { RenderLoop(); });
 }
 
-AvatarViewerUI::~AvatarViewerUI() { FreeBuffers(); }
+AvatarViewerUI::~AvatarViewerUI() {
+  {
+    std::lock_guard<std::mutex> lock(render_mutex_);
+    render_quit_ = true;
+  }
+  render_signal_.notify_all();
+  render_thread_.join();
+  FreeBuffers();
+}
+
+void AvatarViewerUI::RenderLoop() {
+  while (true) {
+    std::shared_ptr<const Scene> scene;
+    View view;
+    {
+      std::unique_lock<std::mutex> lock(render_mutex_);
+      render_signal_.wait(
+          lock, [this]() { return render_quit_ || render_requested_; });
+      if (render_quit_) {
+        return;
+      }
+      render_requested_ = false;
+      scene = pending_scene_;
+      view = pending_view_;
+    }
+    std::vector<uint8_t> rgba = scene ? Render(*scene, view)
+                                      : std::vector<uint8_t>();
+    std::lock_guard<std::mutex> lock(render_mutex_);
+    rendered_rgba_ = std::move(rgba);
+    rendered_ready_ = true;
+  }
+}
+
+// Hands the render thread the scene as it is now and the current view.
+void AvatarViewerUI::RequestRender() {
+  view_dirty_ = false;
+  auto scene = std::make_shared<Scene>();
+  scene->meshes = meshes_;
+  scene->textures = texture_frames_;
+  scene->center = center_;
+  scene->radius = radius_;
+  scene->triangle_count = triangle_count_;
+  std::lock_guard<std::mutex> lock(render_mutex_);
+  pending_scene_ = std::move(scene);
+  pending_view_ = {yaw_, pitch_, zoom_, textured_, tinted_, smooth_};
+  render_requested_ = true;
+  render_signal_.notify_one();
+}
 
 void AvatarViewerUI::FillGroups() {
   groups_ = {
@@ -183,9 +232,10 @@ void AvatarViewerUI::Build() {
   dirty_ = false;
   view_dirty_ = true;
   textures_dirty_ = true;
-  meshes_.clear();
+  meshes_ = std::make_shared<std::vector<Mesh>>();
   triangle_count_ = 0;
   textures_.clear();
+  texture_frames_.clear();
   FreeBuffers();
 
   uint8_t manifest[avatar::kManifestSize] = {};
@@ -377,7 +427,7 @@ void AvatarViewerUI::ReadResult(uint32_t result) {
         mesh.indices.push_back(v < vertex_count ? v : 0);
       }
       triangle_count_ += triangles;
-      meshes_.push_back(std::move(mesh));
+      meshes_->push_back(std::move(mesh));
     }
   }
   if (!triangle_count_) {
@@ -427,8 +477,8 @@ std::array<float, 4> Sample(const std::vector<uint8_t>& rgba, uint32_t width,
 // Draws the meshes into a depth buffered image at kSupersample times the
 // view, lit by their vertex normals, each layer's texture over the one below
 // it, then scales it down to the view.
-void AvatarViewerUI::Render() {
-  view_dirty_ = false;
+std::vector<uint8_t> AvatarViewerUI::Render(const Scene& scene,
+                                            const View& view) {
   const uint32_t width = kViewWidth * kSupersample;
   const uint32_t height = kViewHeight * kSupersample;
   std::vector<float> color(size_t(width) * height * 3, 0.0f);
@@ -437,14 +487,15 @@ void AvatarViewerUI::Render() {
     color[i + 1] = 34.0f;
     color[i + 2] = 40.0f;
   }
-  depth_.assign(size_t(width) * height, -std::numeric_limits<float>::max());
-  view_rgba_.assign(size_t(kViewWidth) * kViewHeight * 4, 255);
+  std::vector<float> depth(size_t(width) * height,
+                           -std::numeric_limits<float>::max());
+  std::vector<uint8_t> view_rgba(size_t(kViewWidth) * kViewHeight * 4, 255);
 
-  if (triangle_count_ && radius_ > 0.0f) {
-    float cy = std::cos(yaw_), sy = std::sin(yaw_);
-    float cp = std::cos(pitch_), sp = std::sin(pitch_);
+  if (scene.triangle_count && scene.radius > 0.0f) {
+    float cy = std::cos(view.yaw), sy = std::sin(view.yaw);
+    float cp = std::cos(view.pitch), sp = std::sin(view.pitch);
     // The avatar's largest extent fills nine tenths of the view's height.
-    float scale = 0.45f * float(height) / radius_ * zoom_;
+    float scale = 0.45f * float(height) / scene.radius * view.zoom;
     auto rotate = [&](const float* p, float* out) {
       float x1 = p[0] * cy + p[2] * sy, z1 = -p[0] * sy + p[2] * cy;
       out[0] = x1;
@@ -456,13 +507,13 @@ void AvatarViewerUI::Render() {
     };
     const float light_dir[3] = {-0.35f, 0.5f, 0.8f};  // Up, left, front.
     std::vector<Projected> projected;
-    for (const auto& mesh : meshes_) {
+    for (const auto& mesh : *scene.meshes) {
       projected.resize(mesh.vertices.size());
       for (size_t v = 0; v < mesh.vertices.size(); ++v) {
         const Vertex& vertex = mesh.vertices[v];
-        float p[3] = {vertex.position[0] - center_[0],
-                      vertex.position[1] - center_[1],
-                      vertex.position[2] - center_[2]};
+        float p[3] = {vertex.position[0] - scene.center[0],
+                      vertex.position[1] - scene.center[1],
+                      vertex.position[2] - scene.center[2]};
         float r[3], n[3];
         rotate(p, r);
         rotate(vertex.normal, n);
@@ -474,11 +525,11 @@ void AvatarViewerUI::Render() {
       }
       // Without textures (or layers) the mesh is drawn once in its color.
       std::vector<Layer> layers = mesh.layers;
-      if (!textured_ || layers.empty()) {
+      if (!view.textured || layers.empty()) {
         layers.assign(1, Layer{0, UINT32_MAX, 0, 0});
       }
       uint32_t tint = 0xFFFFFFFF;
-      if (tinted_) {
+      if (view.tinted) {
         // The skin color (0x1B) for bodies, the first clothes color for the
         // rest: what the manifest painted on the mesh.
         for (const auto& [id, value] : mesh.colors) {
@@ -493,15 +544,16 @@ void AvatarViewerUI::Render() {
       for (size_t layer_index = 0; layer_index < layers.size();
            ++layer_index) {
         const Layer& layer = layers[layer_index];
-        const Texture* texture =
-            layer.texture < textures_.size() ? &textures_[layer.texture]
-                                             : nullptr;
+        const TextureImage* texture =
+            layer.texture < scene.textures.size()
+                ? &scene.textures[layer.texture]
+                : nullptr;
         if (texture && texture->rgba.empty()) {
           continue;
         }
         bool base = layer_index == 0;
         uint32_t flat = texture ? 0xFFFFFFFF : mesh.base_color;
-        if (base && textured_ && !texture) {
+        if (base && view.textured && !texture) {
           flat = mesh.base_color;
         }
         float flat_rgb[3] = {float((flat >> 16) & 0xFF) / 255.0f,
@@ -531,7 +583,7 @@ void AvatarViewerUI::Render() {
           int y0 = std::max(0, int(std::floor(min_y)));
           int y1 = std::min(int(height) - 1, int(std::ceil(max_y)));
           float flat_light = 0.0f;
-          if (!smooth_) {
+          if (!view.smooth) {
             float ux = p[1]->x - p[0]->x, uy = p[1]->y - p[0]->y,
                   uz = p[1]->z - p[0]->z;
             float vx = p[2]->x - p[0]->x, vy = p[2]->y - p[0]->y,
@@ -563,12 +615,13 @@ void AvatarViewerUI::Render() {
               float z = w0 * p[0]->z + w1 * p[1]->z + w2 * p[2]->z;
               size_t pixel = size_t(y) * width + x;
               // The base layer writes depth; the others only go over it.
-              if (base ? z <= depth_[pixel] : z < depth_[pixel] - 0.01f) {
+              if (base ? z <= depth[pixel] : z < depth[pixel] - 0.01f) {
                 continue;
               }
-              float light = smooth_ ? w0 * p[0]->light + w1 * p[1]->light +
-                                          w2 * p[2]->light
-                                    : flat_light;
+              float light = view.smooth ? w0 * p[0]->light +
+                                              w1 * p[1]->light +
+                                              w2 * p[2]->light
+                                        : flat_light;
               std::array<float, 4> texel = {flat_rgb[0], flat_rgb[1],
                                             flat_rgb[2], 1.0f};
               if (texture) {
@@ -577,8 +630,8 @@ void AvatarViewerUI::Render() {
                           w2 * v[2]->uv[set][0];
                 float vv = w0 * v[0]->uv[set][1] + w1 * v[1]->uv[set][1] +
                            w2 * v[2]->uv[set][1];
-                texel = Sample(texture->rgba, texture->rgba_width,
-                               texture->rgba_height, u, vv);
+                texel = Sample(texture->rgba, texture->width,
+                               texture->height, u, vv);
                 if (base) {
                   texel[3] = 1.0f;
                   for (uint32_t c = 0; c < 3; ++c) {
@@ -587,7 +640,7 @@ void AvatarViewerUI::Render() {
                 }
               }
               if (base) {
-                depth_[pixel] = z;
+                depth[pixel] = z;
               }
               float* dst = &color[pixel * 3];
               for (uint32_t c = 0; c < 3; ++c) {
@@ -613,13 +666,14 @@ void AvatarViewerUI::Render() {
           }
         }
       }
-      uint8_t* dst = &view_rgba_[(size_t(y) * kViewWidth + x) * 4];
+      uint8_t* dst = &view_rgba[(size_t(y) * kViewWidth + x) * 4];
       for (uint32_t c = 0; c < 3; ++c) {
         dst[c] = uint8_t(std::clamp(sum[c] / (kSupersample * kSupersample),
                                     0.0f, 255.0f));
       }
     }
   }
+  return view_rgba;
 }
 
 std::unique_ptr<xe::ui::ImmediateTexture> AvatarViewerUI::MakeImage(
@@ -638,10 +692,11 @@ void AvatarViewerUI::UpdateTextureImages() {
   }
   texture_images_.clear();
   view_dirty_ = true;
+  texture_frames_.assign(textures_.size(), TextureImage());
   auto* memory = kernel_memory();
-  for (auto& texture : textures_) {
+  for (size_t index = 0; index < textures_.size(); ++index) {
+    const Texture& texture = textures_[index];
     if (!texture.data) {
-      texture.rgba.clear();
       texture_images_.push_back(nullptr);
       continue;
     }
@@ -674,9 +729,8 @@ void AvatarViewerUI::UpdateTextureImages() {
     }
     texture_images_.push_back(
         MakeImage(blocks_wide * 4, blocks_high * 4, rgba));
-    texture.rgba = std::move(rgba);
-    texture.rgba_width = blocks_wide * 4;
-    texture.rgba_height = blocks_high * 4;
+    texture_frames_[index] = {std::move(rgba), blocks_wide * 4,
+                              blocks_high * 4};
   }
 }
 
@@ -688,15 +742,27 @@ void AvatarViewerUI::OnDraw(ImGuiIO& io) {
   if (dirty_ && !catalog_.empty()) {
     Build();
   }
-  if (view_dirty_) {
-    Render();
-    if (view_texture_) {
-      retired_textures_.push_back(std::move(view_texture_));
-    }
-    view_texture_ = MakeImage(kViewWidth, kViewHeight, view_rgba_);
-  }
   if (textures_dirty_) {
     UpdateTextureImages();
+  }
+  if (view_dirty_) {
+    RequestRender();
+  }
+  {
+    std::vector<uint8_t> rgba;
+    {
+      std::lock_guard<std::mutex> lock(render_mutex_);
+      if (rendered_ready_) {
+        rgba = std::move(rendered_rgba_);
+        rendered_ready_ = false;
+      }
+    }
+    if (!rgba.empty()) {
+      if (view_texture_) {
+        retired_textures_.push_back(std::move(view_texture_));
+      }
+      view_texture_ = MakeImage(kViewWidth, kViewHeight, rgba);
+    }
   }
   while (retired_textures_.size() > kRetiredTextureCount) {
     retired_textures_.pop_front();

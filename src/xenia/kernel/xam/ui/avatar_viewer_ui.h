@@ -11,6 +11,10 @@
 #define XENIA_KERNEL_XAM_UI_AVATAR_VIEWER_UI_H_
 
 #include <array>
+#include <atomic>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <cstdint>
 #include <deque>
 #include <memory>
@@ -79,15 +83,32 @@ class AvatarViewerUI final : public XamGamepadDialog {
   struct Texture {
     std::string label;
     uint32_t format, width, height, slices, slice_size, data;
-    // The current frame, decoded, for sampling.
+  };
+  // A frame of a texture, decoded, for sampling.
+  struct TextureImage {
     std::vector<uint8_t> rgba;
-    uint32_t rgba_width = 0, rgba_height = 0;
+    uint32_t width = 0, height = 0;
+  };
+  // What the render thread draws: made whole on the UI thread, never
+  // changed after, so the thread can read it without a lock.
+  struct Scene {
+    std::shared_ptr<const std::vector<Mesh>> meshes;
+    std::vector<TextureImage> textures;
+    std::array<float, 3> center = {};
+    float radius = 1.0f;
+    size_t triangle_count = 0;
+  };
+  struct View {
+    float yaw, pitch, zoom;
+    bool textured, tinted, smooth;
   };
 
   void FillGroups();
   void Build();
   void ReadResult(uint32_t result);
-  void Render();
+  static std::vector<uint8_t> Render(const Scene& scene, const View& view);
+  void RequestRender();
+  void RenderLoop();
   void UpdateTextureImages();
   void FreeBuffers();
   std::unique_ptr<xe::ui::ImmediateTexture> MakeImage(
@@ -105,11 +126,24 @@ class AvatarViewerUI final : public XamGamepadDialog {
 
   uint32_t result_buffer_ = 0;
   uint32_t gpu_buffer_ = 0;
-  std::vector<Mesh> meshes_;
+  std::shared_ptr<std::vector<Mesh>> meshes_;
   size_t triangle_count_ = 0;
   std::array<float, 3> center_ = {};
   float radius_ = 1.0f;
   std::vector<Texture> textures_;
+  std::vector<TextureImage> texture_frames_;
+
+  // The render thread: takes the latest scene and view and leaves the image
+  // for the UI thread to upload.
+  std::thread render_thread_;
+  std::mutex render_mutex_;
+  std::condition_variable render_signal_;
+  std::shared_ptr<const Scene> pending_scene_;
+  View pending_view_ = {};
+  bool render_requested_ = false;
+  bool render_quit_ = false;
+  std::vector<uint8_t> rendered_rgba_;
+  bool rendered_ready_ = false;
 
   float yaw_ = 0.0f;
   float pitch_ = 0.0f;
@@ -120,8 +154,6 @@ class AvatarViewerUI final : public XamGamepadDialog {
   bool smooth_ = true;
   bool view_dirty_ = true;
   bool textures_dirty_ = true;
-  std::vector<uint8_t> view_rgba_;
-  std::vector<float> depth_;
   std::unique_ptr<xe::ui::ImmediateTexture> view_texture_;
   std::vector<std::unique_ptr<xe::ui::ImmediateTexture>> texture_images_;
   // Replaced textures, kept until frames that may still draw them are done.
