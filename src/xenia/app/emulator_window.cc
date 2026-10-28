@@ -45,6 +45,7 @@
 #include "xenia/base/system.h"
 #include "xenia/base/threading.h"
 #include "xenia/config.h"
+#include "xenia/kernel/xam/ui/avatar_viewer_ui.h"
 #include "xenia/kernel/xam/ui/kinect_tuner_ui.h"
 #include "xenia/ui/imgui_audio_dialog.h"
 #include "xenia/ui/imgui_confirm_dialog.h"
@@ -1693,6 +1694,11 @@ void EmulatorWindow::ToggleContextMenu(bool use_cursor_position) {
   if (emulator_->is_title_open()) {
     context_menu->AddAction("Kinect Tuner", [this, input_sys]() {
       new kernel::xam::ui::KinectTunerUI(imgui_drawer(), input_sys);
+    });
+    // Puts an avatar together from the title's AvatarAssetPack and shows
+    // what XamAvatarGetAssets builds for it.
+    context_menu->AddAction("Avatar Viewer", [this, input_sys]() {
+      new kernel::xam::ui::AvatarViewerUI(imgui_drawer(), input_sys);
     });
   }
 

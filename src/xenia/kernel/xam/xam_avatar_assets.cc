@@ -103,6 +103,8 @@ constexpr float kLatticeOddLayerShift = 1.0f / 3.0f;
 constexpr float kLatticeOddRowShift = 0.5f;
 
 std::mutex state_mutex;
+// The title's threads and the Avatar Viewer both load the pack.
+std::mutex pack_mutex;
 uint32_t skinning_version = 2;
 uint32_t coordinate_mode = 1;
 
@@ -280,6 +282,7 @@ bool Decompress(std::span<const uint8_t> block, std::vector<uint8_t>* out) {
 }
 
 bool LoadAssetPack() {
+  std::lock_guard<std::mutex> lock(pack_mutex);
   if (asset_pack.loaded) {
     return !asset_pack.toc.empty();
   }
@@ -950,6 +953,53 @@ std::vector<QueuedPart> QueueParts(const uint8_t* manifest, uint16_t mask) {
 }
 
 }  // namespace
+
+std::vector<CatalogEntry> AssetCatalog(uint32_t language) {
+  std::vector<CatalogEntry> catalog;
+  if (!LoadAssetPack()) {
+    return catalog;
+  }
+  // Every entry names the part in 13 languages, UTF-16BE strings in the pool
+  // after the table, by XC_LANGUAGE.
+  if (language >= 13) {
+    language = 1;
+  }
+  const auto& toc = asset_pack.toc;
+  for (uint32_t i = 0; i < asset_pack.entry_count; ++i) {
+    const uint8_t* entry = &toc[0x28 + size_t(i) * 0xF8];
+    if (!load_be32(entry + 0xF4)) {
+      continue;
+    }
+    CatalogEntry part;
+    part.index = uint16_t(i);
+    part.mask = load_be32(entry);
+    part.body_type = entry[4] & 0xF;
+    for (size_t o = load_be32(entry + 0xBC + language * 4);
+         o + 1 < toc.size() && (toc[o] || toc[o + 1]); o += 2) {
+      // To UTF-8; the viewer's font only has Latin letters, so the rest of
+      // the BMP becomes '?'.
+      char16_t ch = char16_t((toc[o] << 8) | toc[o + 1]);
+      if (ch < 0x80) {
+        part.name.push_back(char(ch));
+      } else if (ch < 0x800) {
+        part.name.push_back(char(0xC0 | (ch >> 6)));
+        part.name.push_back(char(0x80 | (ch & 0x3F)));
+      } else {
+        part.name.push_back('?');
+      }
+    }
+    catalog.push_back(std::move(part));
+  }
+  return catalog;
+}
+
+void MakeStockId(uint8_t* id, uint32_t mask, uint16_t index,
+                 uint16_t body_type) {
+  std::memcpy(id, kStockMaleBody, 16);
+  xe::store_and_swap<uint32_t>(id, mask);
+  xe::store_and_swap<uint16_t>(id + 4, index);
+  xe::store_and_swap<uint16_t>(id + 6, body_type);
+}
 
 // 0x8196CA80, which XamAvatarManifestGetBodyType calls.
 uint32_t ManifestBodyType(const uint8_t* manifest) {

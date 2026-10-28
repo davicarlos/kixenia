@@ -11,6 +11,8 @@
 #define XENIA_KERNEL_XAM_XAM_AVATAR_ASSETS_H_
 
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #include "xenia/xbox.h"
 
@@ -28,6 +30,21 @@ void SetInitializeParameters(uint32_t version, uint32_t coordinate_mode);
 // The body type of a manifest: 1 for the stock male body, 2 for the stock
 // female one, 0 for anything else.
 uint32_t ManifestBodyType(const uint8_t* manifest);
+
+// A part of the AvatarAssetPack the running title ships.
+struct CatalogEntry {
+  uint16_t index;      // Position in AvatarAssetPack.toc, the stock ID's index.
+  uint32_t mask;       // Components it covers (or face texture/shape slot).
+  uint8_t body_type;   // 1 male, 2 female, 3 both.
+  std::string name;
+};
+// The parts with data, named in the language (an XC_LANGUAGE value, English
+// when out of range). Empty when the title has no AvatarAssetPack.
+std::vector<CatalogEntry> AssetCatalog(uint32_t language);
+
+// The 16-byte ID of a stock part: {mask, index, body type} and the stock GUID.
+void MakeStockId(uint8_t* id, uint32_t mask, uint16_t index,
+                 uint16_t body_type);
 
 // Sizes of the two buffers XamAvatarGetAssets fills for a component mask.
 void GetAssetsResultSize(uint16_t component_mask, uint32_t* result_size,
