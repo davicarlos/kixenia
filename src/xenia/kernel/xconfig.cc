@@ -61,10 +61,9 @@ DEFINE_uint32(
     " optional. Ex) 0x00010001\n",
     "Console");
 
-DEFINE_bool(allow_nui_initialization, false,
-            "Enable NUI initialization\n"
-            " Only set true when testing kinect games. Certain games may\n"
-            " require avatar implementation.",
+DEFINE_bool(allow_nui_initialization, true,
+            "The console's 'Kinect set up' retail flag, which the Kinect Tuner "
+            "sets once; titles read it before they ask for the sensor.",
             "Console");
 
 DEFINE_bool(kinect_disabled, false,

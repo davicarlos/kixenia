@@ -19,10 +19,15 @@
 #include "xenia/kernel/xam/xam_avatar_assets.h"
 #include "xenia/kernel/xam/xam_private.h"
 
-DEFINE_bool(allow_avatar_initialization, false,
-            "Enable Avatar Initialization\n"
-            "Only set true when testing Avatar games. Certain games may crash "
-            "due to requirement of full avatar implementation.",
+// Titles don't expect XamAvatarInitialize to fail: a console always has the
+// avatar library. Kinect Sports, for one, keeps going after a failure and
+// crashes later, when a player steps in front of the sensor and it builds
+// their avatar (0x82559B78 reads the table its initializer 0x82557F50 never
+// filled). With the assets, animations and manifests implemented here, saying
+// yes is the answer that matches the console.
+DEFINE_bool(allow_avatar_initialization, true,
+            "Let titles initialize the avatar library (XamAvatarInitialize). "
+            "Off, titles that assume it works, like Kinect Sports, can crash.",
             "Kernel");
 
 DECLARE_int32(user_language);
