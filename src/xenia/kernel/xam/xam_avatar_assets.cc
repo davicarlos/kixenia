@@ -19,6 +19,7 @@
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <span>
 #include <vector>
 
@@ -952,7 +953,366 @@ std::vector<QueuedPart> QueueParts(const uint8_t* manifest, uint16_t mask) {
   return parts;
 }
 
+// What xam's random avatar generator (0x8197FF28) draws from.
+
+// Chance in percent, for a male and a female avatar, that a random avatar
+// has a part of each kind (0x816343C0). The hat comes first, as it decides
+// which hair variants fit.
+struct PartChance {
+  uint32_t mask;
+  uint8_t male, female;
+};
+constexpr PartChance kPartChances[] = {
+    {0x40, 20, 5},        {0x4, 100, 100},      {0x8, 100, 100},
+    {0x10, 100, 100},     {0x20, 100, 100},     {0x80, 5, 5},
+    {0x100, 10, 10},      {0x200, 5, 20},       {0x400, 1, 75},
+    {0x800, 5, 75},       {0x2000, 100, 100},   {0x4000, 100, 100},
+    {0x8000, 100, 100},   {0x10000, 10, 0},     {0x20000, 20, 40},
+    {0x40000, 0, 0},      {0x80000, 100, 100},  {0x100000, 100, 100},
+    {0x200000, 100, 100},
+};
+// The face texture slot of each mask (0x8197F708) and the shape slot of each
+// mask (0x8197F520).
+constexpr uint32_t kFaceTextureSlotMasks[] = {0x8000,  0x2000,  0x4000,
+                                              0x10000, 0x40000, 0x20000};
+constexpr uint32_t kShapeSlotMasks[] = {0x100000, 0x80000, 0x200000};
+// The weight and the height, both the same five steps (0x816345D8,
+// 0x816345EC).
+constexpr float kBodySteps[] = {-1.0f, -0.5f, 0.0f, 0.5f, 1.0f};
+
+// Skin, all (0x81634610, 18 colors).
+constexpr uint32_t kSkinColors[] = {
+    0xFF6E4124, 0xFF64411B, 0xFF40280E, 0xFFD7AA71,
+    0xFFBE8749, 0xFF98652F, 0xFFFCEEDD, 0xFFF8DBB9,
+    0xFFE6BC8E, 0xFFDBCAB7, 0xFFF0B393, 0xFFE3946B,
+    0xFFE3A976, 0xFFDE914D, 0xFFD3793D, 0xFFD7B971,
+    0xFFC7984C, 0xFFA87D3F,
+};
+// Skin the generator picks (0x81634658, 12 colors).
+constexpr uint32_t kNaturalSkinColors[] = {
+    0xFF6E4124, 0xFFD7AA71, 0xFF64411B, 0xFFBE8749,
+    0xFF98652F, 0xFFE6BC8E, 0xFFE3A976, 0xFFD7B971,
+    0xFFF0B393, 0xFFDE914D, 0xFFC7984C, 0xFFA87D3F,
+};
+// Hair, eyebrows and facial hair (0x81634688, 27 colors).
+constexpr uint32_t kHairColors[] = {
+    0xFFFFFCB5, 0xFFFEEF7C, 0xFFF7D748, 0xFFE4D381,
+    0xFFDCB74F, 0xFFBD934B, 0xFFDECFBA, 0xFFBFA783,
+    0xFF988054, 0xFF906636, 0xFF745131, 0xFF493421,
+    0xFF85541A, 0xFF553921, 0xFF1F120B, 0xFF6E5326,
+    0xFF372116, 0xFF0D0D0D, 0xFFE3802F, 0xFFB85E22,
+    0xFF753E1F, 0xFF92340E, 0xFF682618, 0xFF523436,
+    0xFFE2DEDD, 0xFF8E8274, 0xFF4F463D,
+};
+// Lips, all (0x816349F0, 27 colors).
+constexpr uint32_t kLipColors[] = {
+    0xFFFD6A68, 0xFFD00E0E, 0xFFAD2D2D, 0xFFE58995,
+    0xFFC65265, 0xFF9F5D69, 0xFFD59282, 0xFFB56157,
+    0xFF83463F, 0xFFCF8562, 0xFF875741, 0xFF5C3B2C,
+    0xFFEB7D80, 0xFFF5686B, 0xFFCB6758, 0xFFEFC28B,
+    0xFFECA853, 0xFFBC7535, 0xFFD46552, 0xFFB14A37,
+    0xFF8A1A0E, 0xFFDA61D4, 0xFFB93996, 0xFF8F2D5E,
+    0xFF786DD5, 0xFF6E51A5, 0xFF000000,
+};
+// Lips the generator picks (0x81634A60, 21 colors).
+constexpr uint32_t kNaturalLipColors[] = {
+    0xFFFD6A68, 0xFFE58995, 0xFFD59282, 0xFFD00E0E,
+    0xFFC65265, 0xFFB56157, 0xFFAD2D2D, 0xFF9F5D69,
+    0xFF83463F, 0xFFCF8562, 0xFFEB7D80, 0xFFEFC28B,
+    0xFF875741, 0xFFF5686B, 0xFFECA853, 0xFF5C3B2C,
+    0xFFCB6758, 0xFFBC7535, 0xFFD46552, 0xFFB14A37,
+    0xFF8A1A0E,
+};
+// Eyes, all (0x81634940, 18 colors).
+constexpr uint32_t kEyeColors[] = {
+    0xFF92B2CA, 0xFF6381A7, 0xFF2A72A4, 0xFF88B049,
+    0xFF727F35, 0xFF37512A, 0xFFAE9843, 0xFF82501D,
+    0xFF5B351E, 0xFF917A51, 0xFF312114, 0xFF212121,
+    0xFFCECECC, 0xFF595D5C, 0xFF243F53, 0xFF7B7B95,
+    0xFF8F7497, 0xFFAB0207,
+};
+// Eyes the generator picks (0x81634894, 15 colors).
+constexpr uint32_t kNaturalEyeColors[] = {
+    0xFF92B2CA, 0xFF88B049, 0xFFAE9843, 0xFF6381A7,
+    0xFF727F35, 0xFF82501D, 0xFF2A72A4, 0xFF37512A,
+    0xFF5B351E, 0xFF917A51, 0xFFCECECC, 0xFF312114,
+    0xFF595D5C, 0xFF212121, 0xFF243F53,
+};
+// Eye shadow (0x81634988, 26 colors).
+constexpr uint32_t kEyeShadowColors[] = {
+    0xFFBA72B6, 0xFFF75A87, 0xFF9A2F7D, 0xFFC5496D,
+    0xFF631A46, 0xFFAAA6C9, 0xFF776DD3, 0xFF6E50A4,
+    0xFFA9CEF0, 0xFF5395CA, 0xFF195381, 0xFFB2B05D,
+    0xFFC1C335, 0xFF61701F, 0xFFFFE2A3, 0xFFFEC854,
+    0xFFE06E32, 0xFFF3BC7B, 0xFFC08950, 0xFF904F33,
+    0xFFC1A590, 0xFFB37D59, 0xFF6A3919, 0xFFFFFFFF,
+    0xFFA2A89B, 0xFF000000,
+};
+// Colors 7 and 8 (0x816348D0, 27 colors).
+constexpr uint32_t kColor7Colors[] = {
+    0xFFE8C84F, 0xFFE18417, 0xFFD13927, 0xFFE673B8,
+    0xFF7F3979, 0xFF5F4294, 0xFF66BCDC, 0xFF2AB0AB,
+    0xFF4265BC, 0xFF8ABF55, 0xFF399251, 0xFF4D5523,
+    0xFFBCAE89, 0xFF8C603A, 0xFF654428, 0xFFFFFFFF,
+    0xFF8B8B8B, 0xFF616161, 0xFFAA7C65, 0xFFAD5F47,
+    0xFF59332F, 0xFFD75F47, 0xFFAA1D26, 0xFF81271F,
+    0xFFECB6BE, 0xFFCF5969, 0xFFB24F7D,
+};
+// Hair the generator picks for a group of skin colors (0x816346F4, 11 colors).
+constexpr uint32_t kHairForSkin1[] = {
+    0xFF6E5326, 0xFF745131, 0xFF553921, 0xFF372116,
+    0xFF493421, 0xFF1F120B, 0xFF0D0D0D, 0xFF92340E,
+    0xFF682618, 0xFF523436, 0xFF4F463D,
+};
+// Hair the generator picks for a group of skin colors (0x81634720, 22 colors).
+constexpr uint32_t kHairForSkin2[] = {
+    0xFFDECFBA, 0xFFDCB74F, 0xFFBFA783, 0xFFBD934B,
+    0xFF988054, 0xFF906636, 0xFF85541A, 0xFF6E5326,
+    0xFF745131, 0xFF553921, 0xFF372116, 0xFF493421,
+    0xFF1F120B, 0xFF0D0D0D, 0xFFE3802F, 0xFF92340E,
+    0xFFB85E22, 0xFF682618, 0xFF8E8274, 0xFF753E1F,
+    0xFF523436, 0xFF4F463D,
+};
+// Hair the generator picks for a group of skin colors (0x816347BC, 9 colors).
+constexpr uint32_t kHairForSkin3[] = {
+    0xFF553921, 0xFF372116, 0xFF493421, 0xFF1F120B,
+    0xFF0D0D0D, 0xFF92340E, 0xFF682618, 0xFF523436,
+    0xFF4F463D,
+};
+// Hair the generator picks for a group of skin colors (0x81634778, 17 colors).
+constexpr uint32_t kHairForSkin4[] = {
+    0xFFDCB74F, 0xFFBD934B, 0xFF906636, 0xFF85541A,
+    0xFF6E5326, 0xFF745131, 0xFF553921, 0xFF372116,
+    0xFF493421, 0xFF1F120B, 0xFF0D0D0D, 0xFF92340E,
+    0xFFB85E22, 0xFF682618, 0xFF753E1F, 0xFF523436,
+    0xFF4F463D,
+};
+// Hair the generator picks for a group of skin colors (0x816347E0, 24 colors).
+constexpr uint32_t kHairForSkin5[] = {
+    0xFFE4D381, 0xFFFEEF7C, 0xFFDCB74F, 0xFFBFA783,
+    0xFFF7D748, 0xFFBD934B, 0xFF988054, 0xFF906636,
+    0xFF85541A, 0xFF6E5326, 0xFF745131, 0xFF553921,
+    0xFF372116, 0xFF493421, 0xFF1F120B, 0xFF0D0D0D,
+    0xFFE3802F, 0xFF92340E, 0xFFB85E22, 0xFF682618,
+    0xFF8E8274, 0xFF753E1F, 0xFF523436, 0xFF4F463D,
+};
+// Hair the generator picks for a group of skin colors (0x81634840, 21 colors).
+constexpr uint32_t kHairForSkin6[] = {
+    0xFFE4D381, 0xFFDCB74F, 0xFFBD934B, 0xFF988054,
+    0xFF906636, 0xFF85541A, 0xFF6E5326, 0xFF745131,
+    0xFF553921, 0xFF372116, 0xFF493421, 0xFF1F120B,
+    0xFF0D0D0D, 0xFFE3802F, 0xFF92340E, 0xFFB85E22,
+    0xFF682618, 0xFF8E8274, 0xFF753E1F, 0xFF523436,
+    0xFF4F463D,
+};
+
+std::mutex random_mutex;
+std::mt19937 random_engine{std::random_device{}()};
+
+uint32_t RandomBelow(uint32_t n) {
+  return n ? std::uniform_int_distribution<uint32_t>(0, n - 1)(random_engine)
+           : 0;
+}
+
+template <size_t N>
+uint32_t RandomColor(const uint32_t (&palette)[N]) {
+  return palette[RandomBelow(N)];
+}
+
+// The hair palette goes with the skin color (0x81981448), by the skin's
+// position among all the skin colors.
+uint32_t RandomHairColor(uint32_t skin) {
+  uint32_t group = 0;
+  for (uint32_t i = 0; i < xe::countof(kSkinColors); ++i) {
+    if (kSkinColors[i] == skin) {
+      group = i + 1;
+      break;
+    }
+  }
+  switch (group) {
+    case 1:
+    case 8:
+    case 17:
+    case 18:
+      return RandomColor(kHairForSkin1);
+    case 4:
+    case 7:
+      return RandomColor(kHairForSkin3);
+    case 5:
+    case 14:
+    case 15:
+      return RandomColor(kHairForSkin4);
+    case 6:
+    case 13:
+      return RandomColor(kHairForSkin5);
+    case 9:
+    case 16:
+      return RandomColor(kHairForSkin6);
+    default:
+      return RandomColor(kHairForSkin2);
+  }
+}
+
+// The colors of a stock wearable: a trio from the palette its asset carries
+// (STRB block 7: a count, then trios of colors each in 8 bytes), or black.
+std::array<uint32_t, 3> RandomPartColors(uint32_t index) {
+  std::array<uint32_t, 3> colors = {0xFF000000, 0xFF000000, 0xFF000000};
+  const uint8_t* entry = &asset_pack.toc[0x28 + size_t(index) * 0xF8];
+  uint32_t start = load_be32(entry + 0xF0), size = load_be32(entry + 0xF4);
+  std::vector<StrbBlockView> blocks;
+  if (!ParseStrb(std::span<const uint8_t>(&asset_pack.toc[start], size),
+                 &blocks)) {
+    return colors;
+  }
+  for (const auto& block : blocks) {
+    if (block.type != kStrbBlockPalette || block.body.size() < 4) {
+      continue;
+    }
+    uint32_t count = xe::load<uint32_t>(block.body.data());
+    if (!count || 4 + size_t(count) * 24 > block.body.size()) {
+      break;
+    }
+    const uint8_t* trio = block.body.data() + 4 + RandomBelow(count) * 24;
+    for (uint32_t c = 0; c < 3; ++c) {
+      colors[c] = xe::load<uint32_t>(trio + c * 8);
+    }
+    break;
+  }
+  return colors;
+}
+
+// One random avatar in the manifest layout, following xam's generator: the
+// weight and height (0x8197EBB0), the shapes (0x8197F520), the face
+// textures (0x8197F708), the colors (0x8197ECE8) and the wearables
+// (0x8197FA20), each kind by its chance for the body type.
+// TODO(davicarlos): xam draws the parts of up to 100 avatars at once so that
+// they come out evenly spread (0x8197F1D0, 0x8197FA98); this picks each part
+// on its own.
+void RandomManifest(uint8_t* manifest, uint32_t body_type) {
+  std::memset(manifest, 0, kManifestSize);
+  bool male = body_type == 1;
+  xe::store_and_swap<float>(manifest + 4,
+                            kBodySteps[RandomBelow(xe::countof(kBodySteps))]);
+  xe::store_and_swap<float>(manifest + 8,
+                            kBodySteps[RandomBelow(xe::countof(kBodySteps))]);
+
+  const auto& toc = asset_pack.toc;
+  auto entry = [&](uint32_t i) { return &toc[0x28 + size_t(i) * 0xF8]; };
+  auto entry_mask = [&](uint32_t i) { return load_be32(entry(i)); };
+  auto entry_body = [&](uint32_t i) { return uint32_t(entry(i)[4]); };
+  // Bit 0 of byte 6 is clear on the hair variants made to go under a hat.
+  auto entry_hat_hair = [&](uint32_t i) { return !(entry(i)[6] & 1); };
+  auto pick = [&](auto&& wanted) -> int32_t {
+    std::vector<uint32_t> candidates;
+    for (uint32_t i = 0; i < asset_pack.entry_count; ++i) {
+      if (load_be32(entry(i) + 0xF4) && (entry_body(i) & body_type) &&
+          wanted(i)) {
+        candidates.push_back(i);
+      }
+    }
+    return candidates.empty()
+               ? -1
+               : int32_t(candidates[RandomBelow(uint32_t(candidates.size()))]);
+  };
+  auto write_id = [&](uint8_t* out, uint32_t i) {
+    MakeStockId(out, entry_mask(i), uint16_t(i), uint16_t(entry_body(i)));
+  };
+
+  // The stock body and the head.
+  MakeStockId(manifest + kManifestBodyA, 2, male ? 0 : 1,
+              uint16_t(body_type));
+  xe::store_and_swap<uint16_t>(manifest + kManifestBodyA + 0x10, 2);
+  int32_t head = pick([&](uint32_t i) { return entry_mask(i) == 1; });
+  if (head >= 0) {
+    write_id(manifest + kManifestBodyB, uint32_t(head));
+    xe::store_and_swap<uint16_t>(manifest + kManifestBodyB + 0x10, 1);
+  }
+
+  uint32_t kinds = 0;
+  for (const auto& chance : kPartChances) {
+    if (RandomBelow(100) < (male ? chance.male : chance.female)) {
+      kinds |= chance.mask;
+    }
+  }
+  bool hat = kinds & 0x40;
+  uint32_t used = 0, wearables = 0;
+  for (const auto& chance : kPartChances) {
+    uint32_t mask = chance.mask;
+    if (!(kinds & mask) || mask > 0x800) {
+      continue;
+    }
+    int32_t part = pick([&](uint32_t i) {
+      uint32_t wearable = entry_mask(i) & 0xFFC;
+      return wearable && (wearable & (0u - wearable)) == mask &&
+             !(entry_mask(i) & 0xFFFF & used) &&
+             (mask != 0x4 || entry_hat_hair(i) == hat);
+    });
+    if (part < 0 || wearables >= kMaxParts) {
+      continue;
+    }
+    uint8_t* record = manifest + kManifestParts + wearables++ * 0x20;
+    write_id(record, uint32_t(part));
+    uint16_t covers = uint16_t(entry_mask(uint32_t(part)));
+    xe::store_and_swap<uint16_t>(record + 0x10, covers);
+    auto colors = RandomPartColors(uint32_t(part));
+    for (uint32_t c = 0; c < 3; ++c) {
+      xe::store_and_swap<uint32_t>(record + 0x14 + c * 4, colors[c]);
+    }
+    used |= covers;
+  }
+  for (uint32_t slot = 0; slot < xe::countof(kFaceTextureSlotMasks); ++slot) {
+    uint32_t mask = kFaceTextureSlotMasks[slot];
+    int32_t part =
+        (kinds & mask) ? pick([&](uint32_t i) { return entry_mask(i) == mask; })
+                       : -1;
+    if (part >= 0) {
+      write_id(manifest + kManifestTextures + slot * 0x20, uint32_t(part));
+    }
+  }
+  for (uint32_t slot = 0; slot < xe::countof(kShapeSlotMasks); ++slot) {
+    uint32_t mask = kShapeSlotMasks[slot];
+    int32_t part =
+        (kinds & mask) ? pick([&](uint32_t i) { return entry_mask(i) == mask; })
+                       : -1;
+    if (part >= 0) {
+      write_id(manifest + kManifestShapes + slot * 0x10, uint32_t(part));
+    }
+  }
+
+  // 0x8197ECE8: skin, hair to go with it, eyes, eye shadow, lips and color
+  // 7; the eyebrows and the facial hair take the hair color, color 8 the 7th.
+  uint32_t colors[9];
+  colors[0] = RandomColor(kNaturalSkinColors);
+  colors[1] = RandomHairColor(colors[0]);
+  colors[3] = RandomColor(kNaturalEyeColors);
+  colors[5] = RandomColor(kEyeShadowColors);
+  colors[2] = RandomColor(kNaturalLipColors);
+  colors[7] = RandomColor(kColor7Colors);
+  colors[8] = colors[7];
+  colors[4] = colors[1];
+  colors[6] = colors[1];
+  for (uint32_t i = 0; i < 9; ++i) {
+    xe::store_and_swap<uint32_t>(manifest + kManifestColors + i * 4,
+                                 colors[i]);
+  }
+}
+
 }  // namespace
+
+bool RandomManifests(uint8_t* out, uint32_t count, uint32_t body_types) {
+  if (!LoadAssetPack() || !(body_types & 3)) {
+    return false;
+  }
+  std::lock_guard<std::mutex> lock(random_mutex);
+  for (uint32_t i = 0; i < count; ++i) {
+    uint32_t body_type = body_types & 3;
+    if (body_type == 3) {
+      body_type = 1 + RandomBelow(2);
+    }
+    RandomManifest(out + size_t(i) * kManifestSize, body_type);
+  }
+  return true;
+}
 
 std::vector<CatalogEntry> AssetCatalog(uint32_t language) {
   std::vector<CatalogEntry> catalog;

@@ -96,10 +96,24 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
             user_profile->xuid(), kDashboardID, avatar_info_id,
             &avatar_info_setting_data, avatar_metadata_address);
 
-    // Profile doesn't have avatar info setting
+    // Every profile on a console has an avatar, the dashboard makes one. A
+    // profile without one gets a random avatar, kept in the profile.
     if (!avatar_info_setting_data.data.data.binary.ptr) {
-      extended_error = X_E_FAIL;
-      return X_ERROR_FUNCTION_FAILED;
+      uint8_t* manifest =
+          kernel_memory()->TranslateVirtual<uint8_t*>(avatar_metadata_address);
+      if (!avatar::RandomManifests(manifest, 1, 3)) {
+        extended_error = X_E_FAIL;
+        return X_ERROR_FUNCTION_FAILED;
+      }
+      X_USER_PROFILE_SETTING setting_data = {};
+      setting_data.user_index = static_cast<uint32_t>(user_index);
+      setting_data.setting_id = avatar_info_id;
+      setting_data.data.type = X_USER_DATA_TYPE::BINARY;
+      setting_data.data.data.binary.size = avatar::kManifestSize;
+      setting_data.data.data.binary.ptr = avatar_metadata_address;
+      const UserSetting setting = UserSetting(&setting_data);
+      kernel_state()->xam_state()->user_tracker()->UpsertSetting(
+          user_profile->xuid(), kDashboardID, &setting);
     }
 
     return X_ERROR_SUCCESS;
@@ -236,15 +250,27 @@ dword_result_t XamAvatarGetMetadataRandom_entry(
     dword_t body_type, dword_t avatars_count,
     pointer_t<X_AVATAR_METADATA> avatar_metadata_ptr,
     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  // 0x8197FF28: body types 1 (male), 2 (female) or 3 (either), up to 100
+  // avatars of kManifestSize bytes each.
+  X_HRESULT result = X_E_INVALIDARG;
+  if (!(body_type & ~3u) && avatars_count && avatars_count <= 100 &&
+      avatar_metadata_ptr) {
+    result = avatar::RandomManifests(
+                 reinterpret_cast<uint8_t*>(avatar_metadata_ptr.host_address()),
+                 avatars_count, body_type)
+                 ? X_E_SUCCESS
+                 : X_E_FAIL;
+  }
   if (overlapped_ptr) {
-    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr,
-                                                X_ERROR_SUCCESS);
+    kernel_state()->CompleteOverlappedImmediateEx(
+        overlapped_ptr,
+        XSUCCEEDED(result) ? X_ERROR_SUCCESS : X_ERROR_FUNCTION_FAILED,
+        result, 0);
     return X_ERROR_IO_PENDING;
   }
-
-  return X_STATUS_SUCCESS;
+  return result;
 }
-DECLARE_XAM_EXPORT1(XamAvatarGetMetadataRandom, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarGetMetadataRandom, kAvatars, kImplemented);
 
 dword_result_t XamAvatarGetMetadataSignedOutProfileCount_entry(
     lpdword_t profile_count_ptr, pointer_t<XAM_OVERLAPPED> overlapped_ptr) {

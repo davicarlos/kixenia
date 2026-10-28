@@ -46,6 +46,11 @@ std::vector<CatalogEntry> AssetCatalog(uint32_t language);
 void MakeStockId(uint8_t* id, uint32_t mask, uint16_t index,
                  uint16_t body_type);
 
+// Fills count manifests with random avatars of the allowed body types (1
+// male, 2 female, 3 either), as xam's generator does. False without an
+// AvatarAssetPack.
+bool RandomManifests(uint8_t* out, uint32_t count, uint32_t body_types);
+
 // Sizes of the two buffers XamAvatarGetAssets fills for a component mask.
 void GetAssetsResultSize(uint16_t component_mask, uint32_t* result_size,
                          uint32_t* gpu_resource_size);
