@@ -1361,6 +1361,169 @@ dword_result_t XamShowNuiGuideUI_entry(dword_t tracking_id, dword_t unk2) {
 }
 DECLARE_XAM_EXPORT1(XamShowNuiGuideUI, kUI, kImplemented);
 
+// The other Kinect versions of xam's screens check the NUI HUD, engaging the
+// player, and then show the screen (0x816C4718, 0x816C4D88, 0x816C4188 and
+// 0x816C21C8).
+dword_result_t XamShowNuiAchievementsUI_entry(dword_t tracking_id,
+                                              dword_t user_index,
+                                              dword_t title_id) {
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  return XamShowAchievementsUI_entry(user_index, title_id);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiAchievementsUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiMarketplaceUI_entry(
+    dword_t tracking_id, dword_t user_index, dword_t ui_type,
+    qword_t offer_id, dword_t offer_type, dword_t content_category,
+    dword_t title_id) {
+  if (user_index >= XUserMaxUserCount ||
+      (ui_type != 0 && ui_type != 1 && ui_type != 4 && ui_type != 5)) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  return XamShowMarketplaceUI_entry(user_index, ui_type, offer_id, offer_type,
+                                    content_category, title_id);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiMarketplaceUI, kUI, kSketchy);
+
+dword_result_t XamShowNuiMarketplaceDownloadItemsUI_entry() {
+  // Not in xam's Kinect screens.
+  return 0x78;  // ERROR_CALL_NOT_IMPLEMENTED
+}
+DECLARE_XAM_EXPORT1(XamShowNuiMarketplaceDownloadItemsUI, kUI, kImplemented);
+
+// xam shows another player's gamer card from Xbox Live, and refuses one of
+// the user's own XUIDs. Here only the signed-in profiles have gamer cards.
+dword_result_t XamShowNuiGamerCardUIForXUID_entry(dword_t tracking_id,
+                                                  dword_t user_index,
+                                                  qword_t xuid) {
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  for (uint32_t i = 0; i < XUserMaxUserCount; ++i) {
+    auto user = kernel_state()->xam_state()->GetUserProfile(i);
+    if (xuid && user && user->xuid() == xuid) {
+      return XamShowGamerCardUI_entry(i);
+    }
+  }
+  return X_ERROR_ACCESS_DENIED;
+}
+DECLARE_XAM_EXPORT1(XamShowNuiGamerCardUIForXUID, kUI, kSketchy);
+
+dword_result_t XamShowNuiControllerRequiredUI_entry(dword_t tracking_id) {
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  const Emulator* emulator = kernel_state()->emulator();
+  kernel_state()->xam_state()->is_xam_dialog_present_.store(true);
+  return xeXamDispatchDialogAsync<MessageBoxDialog>(
+      new MessageBoxDialog(emulator->imgui_drawer(), emulator->input_system(),
+                           "Controller required",
+                           "Connect a controller to continue.", {"OK"}, 0),
+      [](MessageBoxDialog*) {});
+}
+DECLARE_XAM_EXPORT1(XamShowNuiControllerRequiredUI, kUI, kImplemented);
+
+// The Kinect versions of the Xbox Live screens (friends 0x21033, friend
+// request 0x21036, game invite 0x21035, party 0x21034, messages 0x21038,
+// video rich presence 0x21025) check the NUI HUD and then need the profile on
+// Xbox Live, which no profile is here: xam answers 0x4DD (not logged on) for
+// a signed-in profile, 0x525 (no such user) otherwise, or 5 (access denied).
+static X_RESULT CheckNuiLiveScreen(uint32_t tracking_id, uint32_t user_index,
+                                   bool access_denied) {
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  if (access_denied) {
+    return X_ERROR_ACCESS_DENIED;
+  }
+  return user_index < XUserMaxUserCount &&
+                 kernel_state()->xam_state()->IsUserSignedIn(user_index)
+             ? X_ERROR_NOT_LOGGED_ON
+             : X_ERROR_NO_SUCH_USER;
+}
+
+dword_result_t XamShowNuiFriendsUI_entry(dword_t tracking_id,
+                                         dword_t user_index) {
+  return CheckNuiLiveScreen(tracking_id, user_index, false);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiFriendsUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiFriendRequestUI_entry(dword_t tracking_id,
+                                               dword_t user_index,
+                                               qword_t xuid) {
+  return CheckNuiLiveScreen(tracking_id, user_index, false);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiFriendRequestUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiGameInviteUI_entry(dword_t tracking_id,
+                                            dword_t user_index,
+                                            lpqword_t xuids, dword_t xuid_count,
+                                            lpvoid_t text) {
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  if (!xuid_count) {
+    return X_ERROR_INVALID_PARAMETER;
+  }
+  return CheckNuiLiveScreen(tracking_id, user_index, false);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiGameInviteUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiCommunitySessionsUI_entry(dword_t tracking_id,
+                                                   dword_t user_index) {
+  return CheckNuiLiveScreen(tracking_id, user_index, false);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiCommunitySessionsUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiPartyUI_entry(dword_t tracking_id,
+                                       dword_t user_index) {
+  return CheckNuiLiveScreen(tracking_id, user_index, true);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiPartyUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiMessagesUI_entry(dword_t tracking_id,
+                                          dword_t user_index) {
+  return CheckNuiLiveScreen(tracking_id, user_index, true);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiMessagesUI, kUI, kImplemented);
+
+dword_result_t XamShowNuiVideoRichPresenceUI_entry(
+    dword_t user_index, dword_t tracking_id, dword_t unk1, dword_t unk2,
+    dword_t unk3, pointer_t<XAM_OVERLAPPED> overlapped) {
+  return CheckNuiLiveScreen(tracking_id, user_index, true);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiVideoRichPresenceUI, kUI, kSketchy);
+
+// Only checks the HUD in this xam.
+dword_result_t XamShowNuiJoinSessionInProgressUI_entry(dword_t tracking_id,
+                                                       dword_t user_index,
+                                                       qword_t xuid) {
+  return kernel_state()->nui()->NuiHudCheck(tracking_id);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiJoinSessionInProgressUI, kUI, kImplemented);
+
+// The games screen, which xam opens with the achievements message (0x21008).
+dword_result_t XamShowNuiGamesUI_entry(dword_t tracking_id, dword_t user_index,
+                                       dword_t title_id) {
+  auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
+  if (result) {
+    return result;
+  }
+  return XamShowAchievementsUI_entry(user_index, 0);
+}
+DECLARE_XAM_EXPORT1(XamShowNuiGamesUI, kUI, kSketchy);
+
 }  // namespace xam
 }  // namespace kernel
 }  // namespace xe
