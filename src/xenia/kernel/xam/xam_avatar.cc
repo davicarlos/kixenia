@@ -146,7 +146,7 @@ dword_result_t XamAvatarGetAssetsResultSize_entry(
   }
   return X_STATUS_SUCCESS;
 }
-DECLARE_XAM_EXPORT1(XamAvatarGetAssetsResultSize, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarGetAssetsResultSize, kAvatars, kImplemented);
 
 dword_result_t XamAvatarGetAssets_entry(
     pointer_t<X_AVATAR_METADATA> avatar_metadata_ptr,
@@ -273,9 +273,13 @@ DECLARE_XAM_EXPORT1(XamAvatarGetMetadataSignedOutProfile, kAvatars, kStub);
 
 dword_result_t XamAvatarManifestGetBodyType_entry(
     pointer_t<X_AVATAR_METADATA> avatar_metadata_ptr) {
-  return static_cast<uint8_t>(X_AVATAR_BODY_TYPE::Male);
+  if (!avatar_metadata_ptr) {
+    return static_cast<uint8_t>(X_AVATAR_BODY_TYPE::Unknown);
+  }
+  return avatar::ManifestBodyType(
+      reinterpret_cast<const uint8_t*>(avatar_metadata_ptr.host_address()));
 }
-DECLARE_XAM_EXPORT1(XamAvatarManifestGetBodyType, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarManifestGetBodyType, kAvatars, kImplemented);
 
 dword_result_t XamAvatarGetInstrumentation_entry(qword_t unk1, lpdword_t unk2) {
   /* Notes:

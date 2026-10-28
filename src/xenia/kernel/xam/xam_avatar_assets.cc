@@ -73,6 +73,13 @@ constexpr uint32_t kManifestDefaultParts = 0x300;
 constexpr uint32_t kManifestTextures = 0x3C;
 constexpr uint32_t kManifestShapes = 0xC;
 constexpr uint32_t kManifestColors = 0xFC;
+// The stock bodies (0x81632E68 and 0x81632E78).
+constexpr uint8_t kStockMaleBody[16] = {0x00, 0x00, 0x00, 0x02, 0x00, 0x00,
+                                        0x00, 0x01, 0xC1, 0xC8, 0xF1, 0x09,
+                                        0xA1, 0x9C, 0xB2, 0xE0};
+constexpr uint8_t kStockFemaleBody[16] = {0x00, 0x00, 0x00, 0x02, 0x00, 0x01,
+                                          0x00, 0x02, 0xC1, 0xC8, 0xF1, 0x09,
+                                          0xA1, 0x9C, 0xB2, 0xE0};
 // Categories a manifest always has a part for: shoes, pants, shirt and one
 // more (0x816331A0).
 constexpr uint16_t kRequiredCategories[] = {0x20, 0x10, 0x8, 0x4};
@@ -865,6 +872,17 @@ std::vector<QueuedPart> QueueParts(const uint8_t* manifest, uint16_t mask) {
 
 }  // namespace
 
+// 0x8196CA80, which XamAvatarManifestGetBodyType calls.
+uint32_t ManifestBodyType(const uint8_t* manifest) {
+  if (!std::memcmp(manifest + kManifestBodyA, kStockMaleBody, 16)) {
+    return 1;
+  }
+  if (!std::memcmp(manifest + kManifestBodyA, kStockFemaleBody, 16)) {
+    return 2;
+  }
+  return 0;
+}
+
 void SetInitializeParameters(uint32_t version, uint32_t mode) {
   std::lock_guard<std::mutex> lock(state_mutex);
   skinning_version = 2 - (version < 3 ? 1 : 0);
@@ -906,6 +924,10 @@ X_HRESULT SetCustomAsset(uint32_t buffer_size, uint32_t asset_data_ptr,
     }
   }
   uint8_t* manifest = TranslateVirtual(manifest_ptr);
+  // The asset has to be made for the manifest's body.
+  if (!(ManifestBodyType(manifest) & descriptor.body_type)) {
+    return X_E_FAIL;
+  }
 
   // The ID of a title asset (0x81965B98): the category, source 0xF, the body
   // type, and the size and address of the data.

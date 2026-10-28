@@ -25,6 +25,10 @@ constexpr uint32_t kManifestSize = 0x3E8;
 // built: the skinning version it expects and its coordinate system.
 void SetInitializeParameters(uint32_t version, uint32_t coordinate_mode);
 
+// The body type of a manifest: 1 for the stock male body, 2 for the stock
+// female one, 0 for anything else.
+uint32_t ManifestBodyType(const uint8_t* manifest);
+
 // Sizes of the two buffers XamAvatarGetAssets fills for a component mask.
 void GetAssetsResultSize(uint16_t component_mask, uint32_t* result_size,
                          uint32_t* gpu_resource_size);
