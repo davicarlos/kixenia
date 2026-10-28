@@ -302,6 +302,31 @@ class UsbAudioLibusb : public UsbAudio {
       return false;
     }
     claimed_ = true;
+    // A sensor a dead process left mid-command keeps its command endpoint
+    // stuck (a bulk transfer to 0x01 times out) and would answer the next
+    // command with the reply nobody read. A port reset puts the firmware
+    // back in step without restarting it; clearing the halts doesn't.
+    State state;
+    if (!ReadState(state)) {
+      XELOGW("Kinect: the audio firmware isn't answering; resetting it");
+      libusb_release_interface(handle_, 0);
+      claimed_ = false;
+      const int reset = libusb_reset_device(handle_);
+      if (reset < 0) {
+        XELOGE("Kinect: resetting the audio device failed ({})",
+               libusb_error_name(reset));
+        return false;
+      }
+      if (libusb_claim_interface(handle_, 0) < 0) {
+        XELOGE("Kinect: cannot claim the motor interface after the reset");
+        return false;
+      }
+      claimed_ = true;
+      if (!ReadState(state)) {
+        XELOGE("Kinect: the audio firmware still isn't answering");
+        return false;
+      }
+    }
     RegisterOpenAudio(this);
     return true;
   }
