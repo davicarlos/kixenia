@@ -62,6 +62,10 @@ X_HRESULT SetCustomAsset(uint32_t buffer_size, uint32_t asset_data_ptr,
                          uint32_t custom_colors_ptr, uint32_t slot_enabled,
                          uint32_t manifest_ptr);
 
+// Reads an animation into the title's animation (0x5990 bytes, its data
+// where +0x598C points, with room for +0x5988 bytes), as xam does.
+X_HRESULT LoadAnimation(const uint8_t* id, uint32_t output_ptr);
+
 // Builds the components of the manifest into the title's buffers.
 X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
                     uint32_t flags, uint32_t result_buffer_ptr,

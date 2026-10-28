@@ -102,6 +102,7 @@ constexpr uint8_t kStrbFormat[16] = {0x59, 0xBD, 0xE0, 0x8B, 0x49, 0x09,
                                      0x4E, 0xE4, 0xB9, 0x91, 0xAD, 0xA8,
                                      0x7B, 0x7C, 0x0B, 0x6B};
 enum StrbBlock : uint8_t {
+  kStrbBlockAnimation = 1,
   kStrbBlockFaceTexture = 2,
   kStrbBlockModel = 3,
   kStrbBlockShape = 4,
@@ -1513,6 +1514,175 @@ void RandomManifest(uint8_t* manifest, uint32_t body_type) {
 }
 
 }  // namespace
+
+namespace {
+
+// The quantization 0x81976D78 reads for an animation track: scale, origin
+// and three widths, into 0x34 bytes; the steps are the scale times the same
+// lattice the vertices use (0x81A975B4, set up at 0x81A70E98).
+void ReadAnimationQuantization(const BitReader& bits, uint64_t at,
+                               uint8_t* out) {
+  std::memset(out, 0, 0x34);
+  uint32_t scale_bits = bits.Read(at, 32);
+  float scale;
+  std::memcpy(&scale, &scale_bits, 4);
+  StoreU32(out, scale_bits);
+  for (uint32_t i = 0; i < 3; ++i) {
+    StoreFloat(out + 4 + i * 4, scale * kLatticeStep[i]);
+    StoreU32(out + 0x10 + i * 4, bits.Read(at + 0x20 + i * 0x20, 32));
+    StoreU32(out + 0x28 + i * 4, bits.Read(at + 0x80 + i * 6, 6));
+  }
+}
+
+// A list of tracks (0x819770F0 with three quantizations each, 0x81976F18
+// with two): its first 32 bits, then the count and, at +8, the entries, the
+// last entry read first; +4 is the bits a key frame takes, the sum of the
+// widths.
+bool ReadAnimationTracks(std::span<const uint8_t> data, size_t header_size,
+                         uint32_t max_count, uint32_t per_entry,
+                         uint8_t* out) {
+  if (data.size() < header_size) {
+    return false;
+  }
+  BitReader bits(data.subspan(0, header_size));
+  StoreU32(out, bits.Read(0, 32));
+  uint32_t count = bits.Read(0x20, 32);
+  if (count > max_count) {
+    return false;
+  }
+  uint8_t* list = out + 4;
+  StoreU32(list, count);
+  uint32_t entry_size = per_entry * 0x34;
+  uint32_t total = 0;
+  for (uint32_t k = 0; k < count; ++k) {
+    uint8_t* entry = list + 8 + (count - 1 - k) * entry_size;
+    for (uint32_t q = 0; q < per_entry; ++q) {
+      ReadAnimationQuantization(bits, 0x40 + uint64_t(k) * per_entry * 0x92 +
+                                          q * 0x92,
+                                entry + q * 0x34);
+      for (uint32_t w = 0; w < 3; ++w) {
+        total += load_be32(entry + q * 0x34 + 0x28 + w * 4);
+      }
+    }
+  }
+  StoreU32(list + 4, total);
+  return true;
+}
+
+// 0x81976CB0: pairs of 32-bit values, the last pair read first, the second
+// value of each stored first; +4 sums those.
+bool ReadAnimationPairs(std::span<const uint8_t> data, uint8_t* out) {
+  if (data.size() < 0x30) {
+    return false;
+  }
+  BitReader bits(data.subspan(0, 0x30));
+  StoreU32(out, bits.Read(0, 32));
+  uint32_t count = bits.Read(0x20, 32);
+  if (count > 5) {
+    return false;
+  }
+  uint8_t* list = out + 4;
+  StoreU32(list, count);
+  uint32_t total = 0;
+  for (uint32_t k = 0; k < count; ++k) {
+    uint8_t* entry = list + 8 + (count - 1 - k) * 0xC;
+    StoreU32(entry + 4, bits.Read(0x40 + uint64_t(k) * 0x40, 32));
+    StoreU32(entry, bits.Read(0x60 + uint64_t(k) * 0x40, 32));
+    total += load_be32(entry);
+  }
+  StoreU32(list + 4, total);
+  return true;
+}
+
+}  // namespace
+
+X_HRESULT LoadAnimation(const uint8_t* id, uint32_t output_ptr) {
+  auto file = FindAsset(id);
+  std::vector<StrbBlockView> blocks;
+  if (!file || !ParseStrb(*file, &blocks)) {
+    XELOGW("Avatar: animation {:016X} not available",
+           xe::load_and_swap<uint64_t>(id));
+    return X_E_FAIL;
+  }
+  const StrbBlockView* block = nullptr;
+  for (const auto& b : blocks) {
+    if (b.type == kStrbBlockAnimation) {
+      block = &b;
+      break;
+    }
+  }
+  if (!block || block->body.size() < 0x28) {
+    return X_E_FAIL;
+  }
+  // 0x81977310: a 0x28 byte header, then the data, copied to where the
+  // title's animation says (+0x598C, with room for +0x5988 bytes). The
+  // tracks are read out of the data; the key frames stay packed for the
+  // title's avatar library.
+  uint8_t* animation = TranslateVirtual(output_ptr);
+  BitReader header(block->body.subspan(0, 0x28));
+  uint32_t size = header.Read(0x120, 32);
+  uint32_t room = load_be32(animation + 0x5988);
+  uint32_t data_ptr = load_be32(animation + 0x598C);
+  if (size > room || !data_ptr || 0x28 + size_t(size) > block->body.size()) {
+    XELOGW("Avatar: animation of {:X} bytes for room of {:X}", size, room);
+    return X_E_FAIL;
+  }
+  StoreU32(animation + 0x5988, size);
+  static const std::pair<uint32_t, uint32_t> kFields[] = {
+      {0x00, 0x5964}, {0x20, 0x5968}, {0x40, 0x596C}, {0x60, 0x5970},
+      {0xA0, 0x5978}, {0x80, 0x5974}, {0xC0, 0x597C}, {0xE0, 0x5984},
+      {0x100, 0x5980}};
+  for (const auto& field : kFields) {
+    StoreU32(animation + field.second, header.Read(field.first, 32));
+  }
+  std::span<const uint8_t> data = block->body.subspan(0x28, size);
+  std::memcpy(TranslateVirtual(data_ptr), data.data(), size);
+  uint32_t first = load_be32(animation + 0x597C);
+  uint32_t second = load_be32(animation + 0x5980);
+  uint32_t third = load_be32(animation + 0x5984);
+  if (first > second || second > third || third > size) {
+    return X_E_FAIL;
+  }
+  bool tracks_read =
+      ReadAnimationTracks(data.subspan(0, first), 0xF6E, 0x48, 3,
+                          animation) &&
+      ReadAnimationTracks(data.subspan(first, second - first), 0xF6E, 0x48, 3,
+                          animation + 0x2BEC) &&
+      ReadAnimationTracks(data.subspan(second, third - second), 0x76, 3, 2,
+                          animation + 0x57D8) &&
+      ReadAnimationPairs(data.subspan(third), animation + 0x591C);
+  if (!tracks_read) {
+    XELOGW("Avatar: bad tracks in animation {:016X}",
+           xe::load_and_swap<uint64_t>(id));
+    return X_E_FAIL;
+  }
+  std::lock_guard<std::mutex> lock(state_mutex);
+  if (skinning_version > 1 && coordinate_mode != 1) {
+    // Turn the tracks to the other handedness, as 0x81977310 does.
+    auto negate = [&](uint32_t offset) {
+      StoreFloat(animation + offset,
+                 -xe::load_and_swap<float>(animation + offset));
+    };
+    for (uint32_t i = 0; i < 0x48; ++i) {
+      uint32_t b = 0x5814 - i * 0x9C;
+      for (uint32_t offset : {0x2CACu, 0x2CB8u, 0x2C80u, 0x2C7Cu, 0x2C8Cu,
+                              0x2C88u, 0xC0u, 0xCCu, 0x94u, 0x90u, 0xA0u,
+                              0x9Cu}) {
+        negate(b - offset);
+      }
+    }
+    for (uint32_t i = 0; i < 3; ++i) {
+      uint32_t b = 0x5958 - i * 0x68;
+      for (uint32_t offset : {0x8Cu, 0x98u, 0x60u, 0x5Cu, 0x6Cu, 0x68u}) {
+        negate(b - offset);
+      }
+    }
+  }
+  XELOGD("Avatar: animation {:016X}: {} bytes, {} and {} tracks",
+         xe::load_and_swap<uint64_t>(id), size, load_be32(animation + 4),
+         load_be32(animation + 0x2BF0));
+  return X_E_SUCCESS;
+}
 
 bool RandomManifests(uint8_t* out, uint32_t count, uint32_t body_types) {
   if (!LoadAssetPack() || !(body_types & 3)) {

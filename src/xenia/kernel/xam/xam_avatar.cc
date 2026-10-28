@@ -414,15 +414,22 @@ dword_result_t XamAvatarLoadAnimation_entry(
 
   XELOGD("{}", summary);
 
+  // The ID is the 16-byte asset ID of the animation (mask 0x400000).
+  X_HRESULT result =
+      output ? avatar::LoadAnimation(reinterpret_cast<const uint8_t*>(
+                                         asset_id_ptr.host_address()),
+                                     output.guest_address())
+             : X_E_INVALIDARG;
   if (overlapped_ptr) {
-    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr,
-                                                X_ERROR_SUCCESS);
+    kernel_state()->CompleteOverlappedImmediateEx(
+        overlapped_ptr,
+        XSUCCEEDED(result) ? X_ERROR_SUCCESS : X_ERROR_FUNCTION_FAILED,
+        result, 0);
     return X_ERROR_IO_PENDING;
   }
-
-  return X_STATUS_SUCCESS;
+  return result;
 }
-DECLARE_XAM_EXPORT1(XamAvatarLoadAnimation, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarLoadAnimation, kAvatars, kSketchy);
 
 dword_result_t XamAvatarGenerateMipMaps_entry(
     lpdword_t avatar_assets_ptr, dword_t flags, dword_t buffer_size,
