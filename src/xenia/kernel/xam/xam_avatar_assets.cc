@@ -91,6 +91,7 @@ constexpr uint8_t kStrbFormat[16] = {0x59, 0xBD, 0xE0, 0x8B, 0x49, 0x09,
 enum StrbBlock : uint8_t {
   kStrbBlockFaceTexture = 2,
   kStrbBlockModel = 3,
+  kStrbBlockShape = 4,
   kStrbBlockDescriptorV1 = 6,
   kStrbBlockPalette = 7,
   kStrbBlockDescriptor = 8,
@@ -871,6 +872,141 @@ bool ApplyFaceTexture(const QueuedPart& part,
   return true;
 }
 
+// The ID a block 4 is for, as 0x81979F30 reads it: the mask (32 bits), the
+// index and the body type (16 bits each) little endian, then the GUID bytes.
+void ReadShapeTarget(const uint8_t* bytes, uint8_t* id) {
+  xe::store_and_swap<uint32_t>(id, xe::load<uint32_t>(bytes));
+  xe::store_and_swap<uint16_t>(id + 4, xe::load<uint16_t>(bytes + 4));
+  xe::store_and_swap<uint16_t>(id + 6, xe::load<uint16_t>(bytes + 6));
+  std::memcpy(id + 8, bytes + 8, 8);
+}
+
+// 0x81966138 and 0x81975D80: a block 4 changes a component already built.
+// Its first part (0x8197A078) hides triangles by collapsing them onto their
+// first vertex, its second (0x8197A710) puts vertices elsewhere: each entry
+// is a byte offset into the vertex buffer and a vertex quantized like the
+// model's, with its own scale and origin. Faces get their nose, chin and ears
+// this way, and some wearables reshape what they cover.
+bool ApplyShape(const StrbBlockView& block, uint8_t* components,
+                uint32_t built, const uint8_t* records) {
+  std::span<const uint8_t> data = block.body;
+  if (data.size() < 0x20) {
+    return false;
+  }
+  uint8_t target[16];
+  ReadShapeTarget(data.data() + 8, target);
+  BitReader hide(data.subspan(0, 0x20));
+  uint32_t hide_count = hide.Read(0, 32);
+  uint32_t index_size = hide.Read(0x20, 32);
+  uint32_t hide_bias = hide.Read(0xC0, 32);
+  uint32_t hide_bits = hide.Read(0xE0, 32);
+  size_t hide_bytes = (uint64_t(hide_count) * hide_bits + 7) / 8;
+  size_t moves = 0x20 + hide_bytes;
+  if (hide_bits > 32 || moves + 0x53 > data.size()) {
+    return false;
+  }
+  std::span<const uint8_t> move_data = data.subspan(moves);
+  BitReader move(move_data);
+  uint32_t move_count = move.Read(0, 32);
+  uint32_t vertex_size = move.Read(0x20, 32);
+  uint32_t offset_bias = move.Read(0xC0, 32);
+  uint32_t offset_bits = move.Read(0xE0, 32);
+  float scale, origin[3];
+  uint32_t scale_bits = move.Read(0x100, 32);
+  std::memcpy(&scale, &scale_bits, 4);
+  for (uint32_t i = 0; i < 3; ++i) {
+    uint32_t v = move.Read(0x120 + 0x20 * i, 32);
+    std::memcpy(&origin[i], &v, 4);
+  }
+  uint32_t width[3] = {move.Read(0x180, 6), move.Read(0x186, 6),
+                       move.Read(0x18C, 6)};
+  struct Field {
+    uint32_t bits, bias;
+  } fields[4] = {{move.Read(0x1B2, 32), move.Read(0x192, 32)},
+                 {move.Read(0x1F2, 32), move.Read(0x1D2, 32)},
+                 {move.Read(0x232, 32), move.Read(0x212, 32)},
+                 {move.Read(0x272, 32), move.Read(0x252, 32)}};
+  uint64_t entry_bits = uint64_t(offset_bits) + width[0] + width[1] + width[2];
+  for (const auto& field : fields) {
+    if (field.bits > 32) {
+      return false;
+    }
+    entry_bits += field.bits;
+  }
+  if (offset_bits > 32 ||
+      0x292 + entry_bits * move_count > move_data.size() * 8) {
+    return false;
+  }
+  float step[3];
+  for (uint32_t i = 0; i < 3; ++i) {
+    step[i] = scale * kLatticeStep[i];
+  }
+
+  bool applied = false;
+  for (int32_t c = int32_t(built) - 1; c >= 0; --c) {
+    const uint8_t* component = components + c * kComponentSize;
+    if (std::memcmp(records + c * kPartRecordSize, target, 16) ||
+        load_be32(component + 0x10) != index_size ||
+        load_be32(component + 0x0C) != vertex_size) {
+      continue;
+    }
+    uint8_t* indices = TranslateVirtual(load_be32(component + 0x28));
+    BitReader hidden(data.subspan(0x20, hide_bytes));
+    for (uint32_t i = 0; i < hide_count; ++i) {
+      uint32_t triangle = hidden.Read(uint64_t(i) * hide_bits, hide_bits) +
+                          hide_bias;
+      if (size_t(triangle) * 6 + 6 > index_size) {
+        return false;
+      }
+      uint8_t* t = indices + size_t(triangle) * 6;
+      std::memcpy(t + 2, t, 2);
+      std::memcpy(t + 4, t, 2);
+    }
+    uint8_t* vertices = TranslateVirtual(load_be32(component + 0x24));
+    uint64_t p = 0x292;
+    for (uint32_t i = 0; i < move_count; ++i) {
+      uint32_t offset = move.Read(p, offset_bits) + offset_bias;
+      p += offset_bits;
+      if (size_t(offset) + 0x1C > vertex_size) {
+        return false;
+      }
+      uint32_t q[3];
+      for (uint32_t a = 0; a < 3; ++a) {
+        q[a] = move.Read(p, width[a]);
+        p += width[a];
+      }
+      float y = float(q[1]) * step[1] + origin[1];
+      float z = float(q[2]) * step[2] + origin[2];
+      if (q[1] & 1) {
+        z += step[2] * kLatticeOddLayerShift;
+      }
+      float x = float(q[0]) * step[0] + origin[0];
+      if ((q[1] ^ q[2]) & 1) {
+        x += step[0] * kLatticeOddRowShift;
+      }
+      uint32_t packed[4];
+      for (uint32_t f = 0; f < 4; ++f) {
+        packed[f] = move.Read(p, fields[f].bits) + fields[f].bias;
+        p += fields[f].bits;
+      }
+      if (coordinate_mode != 1) {
+        z = -z;
+        packed[0] = (uint32_t(-int32_t(packed[0] >> 22)) << 22) |
+                    (packed[0] & 0x3FFFFF);
+      }
+      uint8_t* out = vertices + offset;
+      StoreFloat(out + 0, x);
+      StoreFloat(out + 4, y);
+      StoreFloat(out + 8, z);
+      for (uint32_t f = 0; f < 4; ++f) {
+        StoreU32(out + 0xC + f * 4, packed[f]);
+      }
+    }
+    applied = true;
+  }
+  return applied;
+}
+
 uint32_t ManifestColor(const uint8_t* manifest, uint32_t index) {
   return load_be32(manifest + kManifestColors + index * 4);
 }
@@ -1550,7 +1686,8 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
   uint32_t built = 0;
   for (uint32_t pass = 1; pass <= 2; ++pass) {
     for (const auto& part : parts) {
-      if (part.kind != pass && !(pass == 2 && part.kind == 3)) {
+      // The second pass also looks at components again for their block 4.
+      if (part.kind != pass && pass != 2) {
         continue;
       }
       auto file = FindAsset(part.record.data());
@@ -1578,9 +1715,21 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
         }
         continue;
       }
-      if (part.kind == 3) {
-        // Shapes (0x81966138) aren't applied yet.
-        XELOGD("Avatar: skipping shape {}", part.slot);
+      if (part.kind == 3 || pass == 2) {
+        // Shapes, and the block 4 a component may carry for others.
+        bool any = false, ok = true;
+        for (const auto& block : blocks) {
+          if (block.type == kStrbBlockShape) {
+            any = true;
+            ok &= ApplyShape(block, component_tables, built,
+                             TranslateVirtual(records));
+          }
+        }
+        if (any) {
+          XELOGI("Avatar: shape from {:016X} {}",
+                 xe::load_and_swap<uint64_t>(&part.record[0]),
+                 ok ? "applied" : "not applied");
+        }
         continue;
       }
       if (built >= kMaxParts) {
