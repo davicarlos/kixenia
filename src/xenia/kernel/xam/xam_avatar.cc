@@ -12,6 +12,7 @@
 #include <array>
 #include <cstring>
 
+#include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
 #include "xenia/base/math.h"
 #include "xenia/kernel/util/shim_utils.h"
@@ -23,6 +24,8 @@ DEFINE_bool(allow_avatar_initialization, false,
             "Only set true when testing Avatar games. Certain games may crash "
             "due to requirement of full avatar implementation.",
             "Kernel");
+
+DECLARE_int32(user_language);
 
 namespace xe {
 namespace kernel {
@@ -44,13 +47,13 @@ dword_result_t XamAvatarInitialize_entry(
   avatar::SetInitializeParameters(coordinate_system, unk2);
   return cvars::allow_avatar_initialization ? X_STATUS_SUCCESS : ~0u;
 }
-DECLARE_XAM_EXPORT1(XamAvatarInitialize, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarInitialize, kAvatars, kImplemented);
 
 void XamAvatarShutdown_entry() {
   // Calls XMsgStartIORequestEx(0xf3,0x600002,0,0,0,0).
   // in 12611 its XamUnloadSysApp(0xf2,1)
 }
-DECLARE_XAM_EXPORT1(XamAvatarShutdown, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarShutdown, kAvatars, kSketchy);
 
 // Get & Set
 dword_result_t XamAvatarGetManifestLocalUser_entry(
@@ -129,7 +132,7 @@ dword_result_t XamAvatarGetManifestLocalUser_entry(
   kernel_state()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
   return X_ERROR_IO_PENDING;
 }
-DECLARE_XAM_EXPORT1(XamAvatarGetManifestLocalUser, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarGetManifestLocalUser, kAvatars, kSketchy);
 
 dword_result_t XamAvatarGetManifestsByXuid_entry(
     dword_t user_index, dword_t xuid_count, lpqword_t xuid, dword_t unk,
@@ -244,7 +247,7 @@ dword_result_t XamAvatarSetManifest_entry(
   kernel_state()->CompleteOverlappedDeferredEx(run, overlapped_ptr);
   return X_ERROR_IO_PENDING;
 }
-DECLARE_XAM_EXPORT1(XamAvatarSetManifest, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarSetManifest, kAvatars, kSketchy);
 
 dword_result_t XamAvatarGetMetadataRandom_entry(
     dword_t body_type, dword_t avatars_count,
@@ -444,52 +447,54 @@ dword_result_t XamAvatarGenerateMipMaps_entry(
 }
 DECLARE_XAM_EXPORT1(XamAvatarGenerateMipMaps, kAvatars, kStub);
 
-// Enum
+// Enum: messages 0x60000C, 0x60000D and 0x60000E of the avatarcore app,
+// which hands them to the TOC reader of the AvatarAssetPack (0x8196B578,
+// 0x8196B6C0, 0x8196B528). The first two arguments of Begin aren't used by
+// the reader; the mask, the body type and the flags make the filter.
 dword_result_t XamAvatarBeginEnumAssets_entry(
-    dword_t unk1, dword_t unk2, dword_t unk3, word_t unk4, dword_t unk5,
+    dword_t unk1, dword_t unk2, dword_t mask, word_t body_type, dword_t flags,
     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
-  // unknown[4] & unknown[0] = 0x20080002
-  // buffer_ptr[8]
-  // XMsgStartIORequestEx(0xf3, 0x60000c, overlapped_ptr, buffer_ptr, 0x14,
-  // unknown) 0xf2 12611
-
+  avatar::BeginAssetEnumeration(mask, uint8_t(body_type), flags,
+                                uint32_t(cvars::user_language));
   if (overlapped_ptr) {
     kernel_state()->CompleteOverlappedImmediate(overlapped_ptr,
                                                 X_ERROR_SUCCESS);
     return X_ERROR_IO_PENDING;
   }
-
-  return X_STATUS_SUCCESS;
+  return X_ERROR_SUCCESS;
 }
-DECLARE_XAM_EXPORT1(XamAvatarBeginEnumAssets, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarBeginEnumAssets, kAvatars, kImplemented);
 
+// count is in and out: how many 0x2C4-byte items fit in the buffer, then
+// how many were written. 0 ends the walk; xam answers success then too.
 dword_result_t XamAvatarEnumAssets_entry(
-    lpvoid_t unk1, lpqword_t unk2, pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
-  // unk1 pointer to a struct of size 0x8a48
-  // buffer_ptr = concat(unk1, unk2)
-  // unknown = 0x20080002
-  // XMsgStartIORequestEx(0xf3, 0x60000d, overlapped_ptr, &buffer_ptr, 8,
-  // &unknown) 0xf2 12611
-
-  return X_E_NO_MORE_FILES;  // Stop it from calling endlessly
+    lpvoid_t buffer, lpdword_t count,
+    pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
+  X_RESULT result = X_ERROR_SUCCESS;
+  if (!buffer || !count) {
+    result = X_ERROR_INVALID_PARAMETER;
+  } else {
+    *count = avatar::EnumerateAssets(buffer.as<uint8_t*>(), *count);
+  }
+  if (overlapped_ptr) {
+    kernel_state()->CompleteOverlappedImmediate(overlapped_ptr, result);
+    return X_ERROR_IO_PENDING;
+  }
+  return result;
 }
-DECLARE_XAM_EXPORT1(XamAvatarEnumAssets, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarEnumAssets, kAvatars, kImplemented);
 
 dword_result_t XamAvatarEndEnumAssets_entry(
     pointer_t<XAM_OVERLAPPED> overlapped_ptr) {
-  // unknown[4]
-  // unknown[0] = 0x20080002
-  // XMsgStartIORequestEx(0xf2,0x60000e,overlapped_ptr,0,0,unknown); 12611
-
+  avatar::EndAssetEnumeration();
   if (overlapped_ptr) {
     kernel_state()->CompleteOverlappedImmediate(overlapped_ptr,
                                                 X_ERROR_SUCCESS);
     return X_ERROR_IO_PENDING;
   }
-
-  return X_STATUS_SUCCESS;
+  return X_ERROR_SUCCESS;
 }
-DECLARE_XAM_EXPORT1(XamAvatarEndEnumAssets, kAvatars, kStub);
+DECLARE_XAM_EXPORT1(XamAvatarEndEnumAssets, kAvatars, kImplemented);
 
 // Other
 dword_result_t XamAvatarWearNow_entry(

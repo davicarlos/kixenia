@@ -123,6 +123,18 @@ std::mutex state_mutex;
 std::mutex pack_mutex;
 uint32_t skinning_version = 2;
 uint32_t coordinate_mode = 1;
+uint32_t initialize_version = 0;
+
+// The enumeration a title has open (the TOC reader's +0x19C..+0x1AC).
+struct AssetEnumeration {
+  uint32_t mask = 0;
+  uint8_t body_type = 0;
+  uint32_t flags = 0;
+  uint32_t language = 1;
+  uint32_t next = 0;
+  bool active = false;
+};
+AssetEnumeration asset_enumeration;
 
 struct AssetPack {
   bool loaded = false;
@@ -1759,8 +1771,78 @@ uint32_t ManifestBodyType(const uint8_t* manifest) {
 
 void SetInitializeParameters(uint32_t version, uint32_t mode) {
   std::lock_guard<std::mutex> lock(state_mutex);
+  initialize_version = version;
   skinning_version = 2 - (version < 3 ? 1 : 0);
   coordinate_mode = mode;
+}
+
+void BeginAssetEnumeration(uint32_t mask, uint8_t body_type, uint32_t flags,
+                           uint32_t language) {
+  std::lock_guard<std::mutex> lock(state_mutex);
+  asset_enumeration = AssetEnumeration();
+  asset_enumeration.mask = mask;
+  asset_enumeration.body_type = body_type;
+  asset_enumeration.flags = flags;
+  asset_enumeration.language = language < 13 ? language : 1;
+  asset_enumeration.active = LoadAssetPack() && asset_pack.entry_count != 0;
+}
+
+uint32_t EnumerateAssets(uint8_t* out, uint32_t count) {
+  std::lock_guard<std::mutex> lock(state_mutex);
+  auto& e = asset_enumeration;
+  if (!e.active || initialize_version < 4) {
+    return 0;
+  }
+  uint32_t written = 0;
+  for (; written < count && e.next < asset_pack.entry_count; ++e.next) {
+    const uint8_t* entry = PackEntry(e.next);
+    // The filter (0x8197BDA0): bit 1 of byte 6 hides the entry, bit 0 lists
+    // it in the editor.
+    uint8_t listing = entry[6];
+    uint8_t body = (e.flags & 0x10) ? entry[5] : entry[4];
+    if ((listing & 2) || (!(listing & 1) && !(e.flags & 2))) {
+      continue;
+    }
+    uint32_t mask = load_be32(entry);
+    if ((e.flags & 4) ? mask != e.mask : !(mask & e.mask)) {
+      continue;
+    }
+    if ((e.flags & 8) ? body != e.body_type : !(body & e.body_type)) {
+      continue;
+    }
+    // The item (0x8197E300).
+    uint8_t* item = out + size_t(written) * kAssetItemSize;
+    std::memset(item, 0, kAssetItemSize);
+    MakeStockId(item, mask, uint16_t(e.next), entry[4]);
+    xe::store_and_swap<uint32_t>(item + 0x10, mask);
+    item[0x14] = entry[4];
+    item[0x15] = entry[5];
+    xe::store_and_swap<uint32_t>(item + 0x18, listing);
+    std::memcpy(item + 0x1C, entry + 7, 0x91);
+    xe::store_and_swap<uint32_t>(item + 0xC0, load_be32(entry + 0x98));
+    std::memcpy(item + 0xC4, entry + 0x9C, 0x20);
+    xe::store_and_swap<uint32_t>(item + 0x164, PackDataStart(entry));
+    xe::store_and_swap<uint32_t>(item + 0x168, PackDataSize(entry));
+    // The first pack's bit.
+    item[0x2C0] = 1;
+    if (e.flags & 1) {
+      const auto& toc = asset_pack.toc;
+      size_t o = load_be32(entry + 0xBC + e.language * 4);
+      for (uint32_t c = 0; c < 0x3F && o + 1 < toc.size() &&
+                           (toc[o] || toc[o + 1]);
+           ++c, o += 2) {
+        item[0xE4 + c * 2] = toc[o];
+        item[0xE5 + c * 2] = toc[o + 1];
+      }
+    }
+    ++written;
+  }
+  return written;
+}
+
+void EndAssetEnumeration() {
+  std::lock_guard<std::mutex> lock(state_mutex);
+  asset_enumeration = AssetEnumeration();
 }
 
 void GetAssetsResultSize(uint16_t component_mask, uint32_t* result_size,

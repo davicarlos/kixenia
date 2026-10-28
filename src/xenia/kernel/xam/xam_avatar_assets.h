@@ -46,6 +46,23 @@ std::vector<CatalogEntry> AssetCatalog(uint32_t language);
 void MakeStockId(uint8_t* id, uint32_t mask, uint16_t index,
                  uint16_t body_type);
 
+// XamAvatarBeginEnumAssets, EnumAssets and EndEnumAssets, which walk the
+// AvatarAssetPack through the TOC reader (0x8197C398, 0x8197CE48,
+// 0x8197C420). The filter keeps the parts whose mask and body type share a
+// bit with the given ones (flags 4 and 8: equal them), listed in the editor
+// unless flag 2 asks for the hidden ones too; flag 1 fills the name in the
+// language and flag 0x10 matches the second body byte of the entry. Each
+// item is 0x2C4 bytes (0x8197E300): the stock ID, the entry, the name
+// (UTF-16BE, up to 63 characters) and the pack's bit.
+constexpr uint32_t kAssetItemSize = 0x2C4;
+void BeginAssetEnumeration(uint32_t mask, uint8_t body_type, uint32_t flags,
+                           uint32_t language);
+// Writes up to count items to out and returns how many; 0 once the pack is
+// walked, without an enumeration, or for a title initialized with a version
+// below 4, as xam answers (0x8196B6C0).
+uint32_t EnumerateAssets(uint8_t* out, uint32_t count);
+void EndAssetEnumeration();
+
 // Fills count manifests with random avatars of the allowed body types (1
 // male, 2 female, 3 either), as xam's generator does. False without an
 // AvatarAssetPack.
