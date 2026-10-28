@@ -48,6 +48,8 @@ namespace xam {
 constexpr X_HRESULT kNuiNotConnected = X_E_DEVICE_NOT_CONNECTED;  // 0x8007048F
 constexpr X_HRESULT kNuiNotBound = 0x80070525;
 constexpr X_HRESULT kNuiNtSuccess = 0x10000000;  // HRESULT_FROM_NT(0)
+// The sensor property xam reads the fan's rate from (PsCam code 20).
+constexpr uint16_t kCameraPropertyFanRate = 0x838;
 // xam's title ID for the settings of the dashboard's own profile section.
 constexpr uint32_t kDashboardTitleId = 0xFFFE07D1;
 
@@ -371,36 +373,50 @@ dword_result_t XamNuiGetTrueColorInfo_entry(dword_t unk, dword_t selector,
 DECLARE_XAM_EXPORT1(XamNuiGetTrueColorInfo, kNone, kSketchy);
 
 // PsCam code 46 with selector 0x100 (0x816F9B90): fx, fy, cx and cy in
-// pixels, in the order Dash.FieldCalibration builds its camera matrix from
-// (0x9BD22C38). The Kinect's nominal color camera at 640x480.
+// pixels, which Dash.FieldCalibration puts on the diagonal and last column
+// of a 3x3 matrix (0x9BD22C38) to calibrate the depth it measures. The
+// depth camera at 640x480: the focal length from the zero plane the sensor
+// stores (575.8 on the sensor this was written with; the Kinect's nominal
+// value is 571.26) and the center of the image.
 dword_result_t XamNuiGetCameraIntrinsics_entry(lpvoid_t buffer, dword_t size,
                                                lpdword_t returned_size) {
   if (!buffer || !returned_size || size < 4 * sizeof(float)) {
     return X_E_INVALIDARG;
   }
-  if (!kernel_state()->nui()->IsDeviceReady()) {
+  NUIController* nui = kernel_state()->nui();
+  if (!nui->IsDeviceReady()) {
     return kNuiNotConnected;
   }
+  const float focal_length = nui->device()->camera()->DepthFocalLength();
   auto out = buffer.as<xe::be<float>*>();
-  out[0] = 531.15f;
-  out[1] = 531.15f;
+  out[0] = focal_length;
+  out[1] = focal_length;
   out[2] = 320.0f;
   out[3] = 240.0f;
   *returned_size = 4 * sizeof(float);
   return X_E_SUCCESS;
 }
-DECLARE_XAM_EXPORT1(XamNuiGetCameraIntrinsics, kNone, kSketchy);
+DECLARE_XAM_EXPORT1(XamNuiGetCameraIntrinsics, kNone, kImplemented);
 
-// The sensor's fan (0x816F9BF0): byte 7 of property 0x838 (PsCam code 20),
-// which isn't read here; 4D53090F only keeps it for its audio telemetry.
+// The sensor's fan (0x816F9BF0): the low byte of property 0x838, which xam
+// asks the console's camera driver for with PsCam code 20 (0x819837A8:
+// properties above 2000 come back as {1, value, 0, 0, 0}). Whether that
+// driver passes the id on to the camera firmware's GET_PARAM isn't known:
+// asked that way, the firmware answered 0 for 0x838 and for everything from
+// 0x7DE to 0x83F, with the projector running for four minutes. So this reads
+// the same parameter and hands back 0 as long as the sensor does, and from
+// a recording. 4D53090F only keeps it for its audio telemetry.
 dword_result_t XamNuiGetFanRate_entry(lpvoid_t rate) {
   if (!rate) {
     return X_E_INVALIDARG;
   }
-  if (!kernel_state()->nui()->IsDeviceReady()) {
+  NUIController* nui = kernel_state()->nui();
+  if (!nui->IsDeviceReady()) {
     return X_STATUS_DEVICE_NOT_CONNECTED | X_FACILITY_NT_BIT;
   }
-  *rate.as<uint8_t*>() = 0;
+  uint16_t value = 0;
+  nui->device()->camera()->ReadParameter(kCameraPropertyFanRate, value);
+  *rate.as<uint8_t*>() = static_cast<uint8_t>(value);
   return kNuiNtSuccess;
 }
 DECLARE_XAM_EXPORT1(XamNuiGetFanRate, kNone, kSketchy);

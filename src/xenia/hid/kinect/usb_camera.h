@@ -56,6 +56,28 @@ class UsbCamera {
 
   virtual const UsbCameraCalibration& calibration() const = 0;
 
+  // The focal length of the depth camera in pixels at 640x480, from the
+  // zero plane the sensor stores: a pixel at the reference distance covers
+  // reference_pixel_size on each side of the optical axis. The Kinect's
+  // nominal value is 571.26.
+  float DepthFocalLength() const {
+    const auto& c = calibration();
+    return c.reference_pixel_size > 0.0f
+               ? c.reference_distance / (2.0f * c.reference_pixel_size)
+               : 571.26f;
+  }
+
+  // Reads one of the camera firmware's parameters (command GET_PARAM): the
+  // registers the streams are set up with (0x05 color, 0x06 depth, 0x12
+  // depth format...) and the sensor's own properties above 2000, such as the
+  // fan (0x838). False without a live camera or when the firmware answers an
+  // error; the firmware answers 0 for an id it doesn't know.
+  virtual bool ReadParameter(uint16_t id, uint16_t& value) {
+    static_cast<void>(id);
+    static_cast<void>(value);
+    return false;
+  }
+
   // Copies the newest complete frame if it is newer than `after`. Returns the
   // frame's sequence number, or 0 when there is no newer frame.
   virtual uint32_t CopyDepthFrame(uint32_t after,

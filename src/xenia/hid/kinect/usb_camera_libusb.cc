@@ -82,6 +82,7 @@ constexpr uint8_t kPacketFrameStart = 1;
 constexpr uint8_t kPacketFrameEnd = 5;
 
 // Camera commands.
+constexpr uint16_t kCommandReadRegister = 0x02;
 constexpr uint16_t kCommandWriteRegister = 0x03;
 constexpr uint16_t kCommandReadFixedParameters = 0x04;
 constexpr uint16_t kCommandReadAlgorithmParameters = 0x16;
@@ -302,6 +303,25 @@ class UsbCameraLibusb : public UsbCamera {
 
   const UsbCameraCalibration& calibration() const override {
     return calibration_;
+  }
+
+  bool ReadParameter(uint16_t id, uint16_t& value) override {
+    // Commands share the control endpoint and the tag with Close; the
+    // streams keep running meanwhile.
+    std::lock_guard<xe_mutex> lock(close_mutex_);
+    if (!handle_ || !running_) {
+      return false;
+    }
+    const uint16_t payload[1] = {id};
+    uint8_t reply[kMaxReplyBytes];
+    const int length = SendCommand(kCommandReadRegister, payload,
+                                   sizeof(payload), reply, sizeof(reply));
+    // {status, value}, both 16-bit.
+    if (length < 4 || reply[0] || reply[1]) {
+      return false;
+    }
+    value = static_cast<uint16_t>(reply[2] | (reply[3] << 8));
+    return true;
   }
 
   uint32_t CopyDepthFrame(uint32_t after,
