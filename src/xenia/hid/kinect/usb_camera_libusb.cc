@@ -172,6 +172,10 @@ class FrameAssembler {
       synced_ = true;
     } else if (!synced_ ||
                header->sequence != static_cast<uint8_t>(sequence_ + 1)) {
+      // A packet got lost on the bus: the frame being built is dropped.
+      if (synced_) {
+        ++dropped_;
+      }
       synced_ = false;
       return;
     }
@@ -180,6 +184,7 @@ class FrameAssembler {
                      packet + length);
     if (building_.size() > frame_bytes_) {
       // Drops a frame that is longer than expected.
+      ++dropped_;
       building_.clear();
       synced_ = false;
       return;
@@ -195,7 +200,27 @@ class FrameAssembler {
         if (*on_frame_) {
           (*on_frame_)();
         }
+        ReportStats();
+      } else {
+        ++dropped_;
       }
+    }
+  }
+
+  // Every 300 complete frames (10 s at 30 fps), how many were lost on the
+  // way: lost packets mean the bus is short of bandwidth for the stream.
+  void ReportStats() {
+    if (++complete_ % 300 != 0) {
+      return;
+    }
+    const uint32_t dropped = dropped_;
+    dropped_ = 0;
+    if (dropped) {
+      XELOGW("Kinect: {} stream: 300 frames, {} dropped to lost packets",
+             flag_ == kDepthStreamFlag ? "depth" : "color", dropped);
+    } else if (complete_ % 1800 == 0) {
+      XELOGI("Kinect: {} stream: {} frames, none dropped",
+             flag_ == kDepthStreamFlag ? "depth" : "color", complete_);
     }
   }
 
@@ -214,6 +239,8 @@ class FrameAssembler {
   const std::function<void()>* const on_frame_;
   bool synced_ = false;
   uint8_t sequence_ = 0;
+  uint32_t complete_ = 0;
+  uint32_t dropped_ = 0;
   std::vector<uint8_t> building_;
   xe_mutex mutex_;
   std::vector<uint8_t> latest_;

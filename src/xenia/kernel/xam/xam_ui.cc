@@ -10,6 +10,7 @@
 #include "xenia/kernel/xam/xam_ui.h"
 
 #include <atomic>
+#include <thread>
 #include <algorithm>
 
 #include "xenia/app/emulator_window.h"
@@ -45,6 +46,12 @@ DEFINE_bool(storage_selection_dialog, false,
 DECLARE_int32(license_mask);
 
 constexpr std::chrono::milliseconds kUIDelayMillis(200);
+
+DEFINE_bool(kinect_auto_signin, true,
+            "Let the Kinect sign-in screen (XamShowNuiSigninUI) keep the profile "
+            "already signed in instead of asking, as the console does for the "
+            "engaged player.",
+            "Kinect");
 
 namespace xe {
 namespace kernel {
@@ -1121,11 +1128,40 @@ dword_result_t XamShowSigninUIEx_entry(
 }
 DECLARE_XAM_EXPORT1(XamShowSigninUIEx, kUserProfiles, kSketchy);
 
+// The Kinect sign-in screen ("wave to sign in"): with a profile already
+// signed in, the screen only opens and closes, as the console does for the
+// player it engaged; otherwise the sign-in dialog picks one.
 dword_result_t XamShowNuiSigninUI_entry(dword_t tracking_id, dword_t user_index,
                                         dword_t flags) {
   auto result = kernel_state()->nui()->NuiHudCheck(tracking_id);
   if (result) {
     return result;
+  }
+  if (cvars::kinect_auto_signin) {
+    auto xam_state = kernel_state()->xam_state();
+    uint32_t slot = user_index;
+    if (slot >= XUserMaxUserCount) {
+      slot = XUserMaxUserCount;
+      for (uint32_t i = 0; i < XUserMaxUserCount; ++i) {
+        if (xam_state->IsUserSignedIn(i)) {
+          slot = i;
+          break;
+        }
+      }
+    }
+    if (slot < XUserMaxUserCount && xam_state->IsUserSignedIn(slot)) {
+      if (xam_state->IsUIActive()) {
+        return X_ERROR_ACCESS_DENIED;
+      }
+      XELOGI("NUI: Kinect sign-in for player {:08X} kept profile slot {}",
+             uint32_t(tracking_id), slot);
+      kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
+      std::thread([]() {
+        xe::threading::Sleep(kUIDelayMillis);
+        kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
+      }).detach();
+      return X_ERROR_SUCCESS;
+    }
   }
   uint32_t users_needed = 1;
   uint32_t sent_flags = flags | static_cast<uint32_t>(SigninUiFlags::NUI);
