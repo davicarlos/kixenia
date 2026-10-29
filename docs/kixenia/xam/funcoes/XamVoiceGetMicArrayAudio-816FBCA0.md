@@ -1,9 +1,9 @@
 # XamVoiceGetMicArrayAudio
 
-**Endereço:** 0x816FBCA0 · **Ordinal:** 988 · **Área:** [Voz e microfones](README.md#voz-e-microfones) · **Xenia:** ❌ ausente
+**Endereço:** 0x816FBCA0 · **Ordinal:** 988 · **Área:** [Voz e microfones](README.md#voz-e-microfones) · **Xenia:** ✅ implementada
 
 ## O que faz
-kernel XVoiced*
+forma antiga da `XamVoiceGetMicArrayAudioEx`: recebe um handle de evento em vez do KEVENT e preenche +0x2C..+0x3C do pedido com 0, 5, 5, 5, 5 antes de passar ao mesmo trabalhador
 
 ## Fatos do decompilado
 - Kernel: ObReferenceObjectByHandle (xboxkrnl 0x110)

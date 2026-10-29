@@ -164,6 +164,16 @@ def escrever_indices(destinos):
             if len(titulos) > 1:
                 partes.append(f"## {titulo}")
             partes.append("\n".join(itens))
+        if caminho == "kinect/jogos/README.md":
+            # Todas as notas de jogos exportadas que o índice do vault não lista uma a uma
+            # (as geradas pelo jogos/gen_jogo.py), em ordem alfabética.
+            vistos = set(re.findall(r"\[\[([^\]|#]+)", "\n".join(partes)))
+            extras = sorted(n for n, d in destinos.items() if d.startswith("kinect/jogos/") and n not in vistos)
+            if extras:
+                partes.append("## Todos os jogos analisados\n\nUma nota por jogo do HD, gerada do executável "
+                              "(importações, funções que falam com o Kinect, runtime NUI embutido) e da bateria "
+                              "ao vivo: veja [[Jogos-Kinect-Indice]] e [[Jogos-Kinect-Pendencias]].\n\n"
+                              + "\n".join(f"- [[{n}]]" for n in extras))
         texto, _ = limpar("\n\n".join(partes) + "\n", caminho, destinos)
         open(os.path.join(REPO, caminho), "w", encoding="utf-8").write(texto)
 

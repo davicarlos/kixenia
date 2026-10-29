@@ -1,0 +1,900 @@
+# Crashed Ice (título 58411253)
+
+**No HD:** `Crashed Ice` (pacote XBLA (`000D0000/`)). **Executável:** 25920 KB de imagem, base 0x82000000, entrada 0x82B6F4B0, 65556 funções no `.pdata`, `.text` 0x822f0000–0x837BA4CC.
+
+Relacionado: [Jogos-Kinect-Comparacao](../jogos-kinect-comparacao.md), [Kinect-Xenia-Edge](../kinect-xenia-edge.md), [Kinect-Mapa-XAM](../kinect-mapa-xam.md).
+
+## Estado no Xenia Edge
+
+> [!NOTE]
+> **Ainda não rodado na bateria ao vivo; só a análise estática.**
+
+## Como o jogo usa o Kinect
+
+- **Câmera e sensor:** 3 importações (`PsCamDeviceRequest`, `XamNuiCameraRememberFloor`, `XamNuiGetDeviceStatus`); 0 funções próprias e 3 do runtime.
+- **Inclinação e motor:** 6 importações (`XamNuiCameraElevationGetAngle`, `XamNuiCameraElevationSetAngle`, `XamNuiCameraElevationStopMovement`, `XamNuiCameraTiltGetStatus`, `XamNuiCameraTiltReportStatus`, `XamNuiCameraTiltSetCallback`); 0 funções próprias e 11 do runtime.
+- **Kinect ID e biometria:** 6 importações (`XamNuiIdentityGetSessionId`, `XamReadBiometricData`, `XamUserNuiEnableBiometric`, `XamUserNuiGetEnrollmentIndex`, `XamUserNuiGetUserIndex`, `XamWriteBiometricData`); 0 funções próprias e 11 do runtime.
+- **Voz e microfones:** 8 importações (`XAudioGetVoiceCategoryVolume`, `XamShowGameVoiceChannelUI`, `XamShowVoiceMailUI`, `XamVoiceClose`, `XamVoiceCreate`, `XamVoiceHeadsetPresent`, `XamVoiceIsActiveProcess`, `XamVoiceSubmitPacket`); 0 funções próprias e 10 do runtime; **faltam/stub: `XAudioGetVoiceCategoryVolume`, `XamShowGameVoiceChannelUI`, `XamShowVoiceMailUI`, `XamVoiceClose`, `XamVoiceCreate`, `XamVoiceHeadsetPresent`, `XamVoiceIsActiveProcess`, `XamVoiceSubmitPacket`**.
+- **Telas Nui do sistema:** 16 importações (`XamShowNuiAchievementsUI`, `XamShowNuiCommunitySessionsUI`, `XamShowNuiControllerRequiredUI`, `XamShowNuiDeviceSelectorUI`, `XamShowNuiDirtyDiscErrorUI`, `XamShowNuiFriendRequestUI`, `XamShowNuiFriendsUI`, `XamShowNuiGameInviteUI` e mais 8); 1 funções próprias (0x82B6C838) e 1 do runtime; **faltam/stub: `XamShowNuiDirtyDiscErrorUI`**.
+- **Câmera Xbox Live Vision:** 11 importações (`XUsbcamCreate`, `XUsbcamDestroy`, `XUsbcamGetConfig`, `XUsbcamGetState`, `XUsbcamGetView`, `XUsbcamReadFrame`, `XUsbcamReset`, `XUsbcamSetCaptureMode` e mais 3); 4 funções próprias (0x82F97628, 0x82F977A8, 0x82F97B28, 0x82F97F30) e 9 do runtime; **faltam/stub: `XUsbcamCreate`, `XUsbcamDestroy`, `XUsbcamGetConfig`, `XUsbcamGetState`, `XUsbcamGetView`, `XUsbcamReadFrame`, `XUsbcamReset`, `XUsbcamSetCaptureMode`, `XUsbcamSetConfig`, `XUsbcamSetView`, `XUsbcamSnapshot`**.
+- **Avatares:** 13 importações (`XamAvatarGenerateMipMaps`, `XamAvatarGetAssets`, `XamAvatarGetAssetsResultSize`, `XamAvatarGetManifestLocalUser`, `XamAvatarGetManifestsByXuid`, `XamAvatarGetMetadataRandom`, `XamAvatarGetMetadataSignedOutProfile`, `XamAvatarGetMetadataSignedOutProfileCount` e mais 5); 4 funções próprias (0x82996520, 0x82996678, 0x829D05C8, 0x829D0E00) e 10 do runtime; **faltam/stub: `XamAvatarGenerateMipMaps`, `XamAvatarGetManifestsByXuid`, `XamAvatarGetMetadataSignedOutProfile`, `XamAvatarGetMetadataSignedOutProfileCount`**.
+- **Mensagens aos apps do sistema (XMsg):** 6 importações (`XMsgCancelIORequest`, `XMsgCompleteIORequest`, `XMsgInProcessCall`, `XMsgStartIORequest`, `XMsgStartIORequestEx`, `XMsgSystemProcessCall`); 1 funções próprias (0x829CAB60) e 91 do runtime.
+- **Cache do xam:** 3 importações (`XamCacheCloseFile`, `XamCacheOpenFile`, `XamCacheReset`); 0 funções próprias e 1 do runtime.
+
+## Chamadas ao sistema
+
+**472 importações** (249 do `xam.xex`, 223 do `xboxkrnl.exe`), 3533 chamadas diretas no código. Estado no Xenia Edge (kixenia): 294 implementadas, 43 aproximadas, 52 stubs, 82 ausentes.
+
+**Como foi feito:** XEX decifrado (`mex_decifra.py`) e descomprimido (`xexinfo`); importações e thunks da tabela do XEX; chamadas = `bl`/`b` para cada thunk; a função de cada chamada vem do `.pdata`; essas funções (e quem as chama) foram decompiladas pelo Ghidra 12.1.4 com a linguagem VMX128, sem análise automática (`jogos/pipeline.py`).
+
+### Funções do jogo que falam com o Kinect
+
+Das 154 funções que chamam o sistema, **144 são o runtime NUI embutido** (a biblioteca da Microsoft que todo título Kinect leva: a mesma função, com o mesmo tamanho, as mesmas importações e as mesmas mensagens, aparece em 3 ou mais jogos) e **10 são código próprio do jogo**. As próprias vêm primeiro; o runtime fica recolhido no fim.
+
+#### Código próprio do jogo
+
+| Função | Tamanho | Chama | Chamada por | O que faz | Decompilada |
+|---|---|---|---|---|---|
+| 0x82996520 | 176 | `XamAvatarGetManifestsByXuid` | 0 |  | ✅ |
+| 0x82996678 | 80 | `XamAvatarGetMetadataSignedOutProfileCount` | 0 |  | ✅ |
+| 0x829CAB60 | 96 | `XMsgCancelIORequest` | 2 |  | ✅ |
+| 0x829D05C8 | 2100 | `XamAvatarGetAssets`, `XamAvatarManifestGetBodyType` | 1 |  | ✅ |
+| 0x829D0E00 | 744 | `XamAvatarGenerateMipMaps` | 1 |  | ✅ |
+| 0x82B6C838 | 28 | `XamShowNuiDirtyDiscErrorUI` | 0 | `XamShowNuiDirtyDiscErrorUI`: NuiHudCheck + mensagem de disco sujo (0x53, 0x2B) | ⚠️ |
+| 0x82F97628 | 384 | `XUsbcamGetConfig` | 0 |  | ✅ |
+| 0x82F977A8 | 252 | `XUsbcamGetConfig` | 0 |  | ✅ |
+| 0x82F97B28 | 68 | `XUsbcamGetView` | 0 |  | ✅ |
+| 0x82F97F30 | 224 | `XUsbcamSnapshot` | 0 |  | ✅ |
+
+<details><summary><b>Runtime NUI embutido</b> (144 funções)</summary>
+
+| Função | Tamanho | Chama | Chamada por | O que faz | Decompilada |
+|---|---|---|---|---|---|
+| 0x825EB3C8 | 96 | `PsCamDeviceRequest` | 0 |  | ✅ |
+| 0x825FD6C0 | 540 | `XamNuiIdentityGetSessionId`, `XamUserNuiGetUserIndex` | 1 | `XamNuiIdentityGetSessionId`: 8 bytes aleatórios, criados na primeira chamada; `XamUserNuiGetUserIndex`: o usuário com aquele cadastro | ✅ |
+| 0x825FD8E0 | 432 | `XamNuiIdentityGetSessionId` | 1 | `XamNuiIdentityGetSessionId`: 8 bytes aleatórios, criados na primeira chamada | ✅ |
+| 0x825FF870 | 356 | `XamUserNuiGetUserIndex` | 0 | `XamUserNuiGetUserIndex`: o usuário com aquele cadastro | ✅ |
+| 0x82600AE8 | 388 | `XamNuiIdentityGetSessionId` | 1 | `XamNuiIdentityGetSessionId`: 8 bytes aleatórios, criados na primeira chamada | ✅ |
+| 0x82600C70 | 3200 | `XamNuiIdentityGetSessionId` | 5 | `XamNuiIdentityGetSessionId`: 8 bytes aleatórios, criados na primeira chamada | ✅ |
+| 0x82604D68 | 284 | `XamNuiCameraElevationStopMovement`, `XamNuiCameraTiltReportStatus` | 1 | `XamNuiCameraElevationStopMovement`: Detroit {0x3304} ou Mca {0x24}, depois 0xFE 0x2B009 ao motor do título; `XamNuiCameraTiltReportStatus`: o título informa 0x2B006 (0x10) ou 0x2B00C (0xE0) → callback de 0x81A85C20 | ✅ |
+| 0x82605018 | 92 | `XamNuiCameraElevationGetAngle` | 0 | `XamNuiCameraElevationGetAngle`: lê o status ('XtSs', 0x50 bytes), atan2 do acelerômetro × 57,3 + deslocamento; também o estado (&3) | ✅ |
+| 0x82605078 | 132 | `XamNuiCameraElevationSetAngle` | 3 | `XamNuiCameraElevationSetAngle`: FUN_8180C700(0xDEADBEEF, ângulo − 0x81AAC9D0): Detroit 0x33148/0x3314C ou Mca | ✅ |
+| 0x826051A8 | 144 | `XamNuiCameraElevationStopMovement` | 0 | `XamNuiCameraElevationStopMovement`: Detroit {0x3304} ou Mca {0x24}, depois 0xFE 0x2B009 ao motor do título | ✅ |
+| 0x826052B8 | 76 | `XamNuiCameraTiltGetStatus` | 0 | `XamNuiCameraTiltGetStatus`: status 'XtSs' de 0x50 bytes a partir do bloco de 0x48 do motor (Detroit 0xF0410, 0x45 bytes; Mca código 0x23) | ✅ |
+| 0x826056F8 | 144 | `XamNuiCameraElevationSetAngle` | 3 | `XamNuiCameraElevationSetAngle`: FUN_8180C700(0xDEADBEEF, ângulo − 0x81AAC9D0): Detroit 0x33148/0x3314C ou Mca | ✅ |
+| 0x82605788 | 468 | `XamNuiCameraRememberFloor`, `XamNuiCameraTiltReportStatus` | 1 | `XamNuiCameraRememberFloor`: guarda o plano do chão (4 floats em 0x81AAC9E0) e lê o status do motor (0x48 bytes); `XamNuiCameraTiltReportStatus`: o título informa 0x2B006 (0x10) ou 0x2B00C (0xE0) → callback de 0x81A85C20 | ✅ |
+| 0x82605960 | 676 | `XamNuiCameraElevationGetAngle` | 2 | `XamNuiCameraElevationGetAngle`: lê o status ('XtSs', 0x50 bytes), atan2 do acelerômetro × 57,3 + deslocamento; também o estado (&3) | ✅ |
+| 0x82605DF0 | 780 | `XamNuiCameraTiltReportStatus` | 0 | `XamNuiCameraTiltReportStatus`: o título informa 0x2B006 (0x10) ou 0x2B00C (0xE0) → callback de 0x81A85C20 | ✅ |
+| 0x826061B0 | 148 | `XamNuiCameraTiltSetCallback` | 1 | `XamNuiCameraTiltSetCallback`: 0xFE 0x2B007: registra o motor de inclinação do título (0x81A85C40) | ✅ |
+| 0x82606A90 | 2436 | `XamNuiCameraElevationStopMovement` | 1 | `XamNuiCameraElevationStopMovement`: Detroit {0x3304} ou Mca {0x24}, depois 0xFE 0x2B009 ao motor do título | ✅ |
+| 0x8260F638 | 996 | `XamNuiIdentityGetSessionId` | 1 | `XamNuiIdentityGetSessionId`: 8 bytes aleatórios, criados na primeira chamada | ✅ |
+| 0x82613F10 | 392 | `XamUserNuiGetEnrollmentIndex` | 1 | `XamUserNuiGetEnrollmentIndex`: +0x34 se +0x30, senão −2 / 0x80070525 | ✅ |
+| 0x82614158 | 336 | `XamUserNuiGetUserIndex` | 1 | `XamUserNuiGetUserIndex`: o usuário com aquele cadastro | ✅ |
+| 0x826143D8 | 248 | `XamCacheCloseFile`, `XamCacheOpenFile`, `XamCacheReset` | 1 |  | ✅ |
+| 0x826144D0 | 488 | `XamReadBiometricData` | 1 | `XamReadBiometricData`: XMsg 0xFB 0xB0076 (Live); até 0x32000 bytes | ✅ |
+| 0x82614808 | 708 | `XamReadBiometricData` | 0 | `XamReadBiometricData`: XMsg 0xFB 0xB0076 (Live); até 0x32000 bytes | ✅ |
+| 0x82614E18 | 604 | `XamReadBiometricData`, `XamUserNuiEnableBiometric`, `XamWriteBiometricData` | 1 | `XamReadBiometricData`: XMsg 0xFB 0xB0076 (Live); até 0x32000 bytes; `XamUserNuiEnableBiometric`: configuração de perfil 0x1004004E; desligar apaga os dados e envia 0x2A009 | ✅ |
+| 0x8264E6F8 | 352 | `XMsgInProcessCall` | 2 | XMsg: 0x58020 ao app 0xFC | ✅ |
+| 0x8264E858 | 304 | `XMsgInProcessCall` | 1 | XMsg: 0x58023 ao app 0xFC | ✅ |
+| 0x8264E988 | 752 | `XMsgStartIORequest` | 0 |  | ✅ |
+| 0x8264EC78 | 568 | `XMsgStartIORequest` | 0 |  | ✅ |
+| 0x8264EEB0 | 384 | `XMsgInProcessCall` | 0 | XMsg: 0x58019 ao app 0xFC | ✅ |
+| 0x8264F030 | 312 | `XMsgInProcessCall` | 0 | XMsg: 0x58046 ao app 0xFC | ✅ |
+| 0x8264F168 | 320 | `XMsgInProcessCall` | 0 | XMsg: 0x5801E ao app 0xFC | ✅ |
+| 0x8264F2A8 | 320 | `XMsgInProcessCall` | 0 | XMsg: 0x58044 ao app 0xFC | ✅ |
+| 0x8264F3E8 | 608 | `XMsgStartIORequest` | 0 |  | ✅ |
+| 0x8264F648 | 732 | `XMsgStartIORequest` | 2 |  | ✅ |
+| 0x8264F928 | 648 | `XMsgStartIORequest` | 1 |  | ✅ |
+| 0x8264FBB0 | 656 | `XMsgStartIORequest` | 0 |  | ✅ |
+| 0x8264FE40 | 572 | `XMsgStartIORequest` | 3 |  | ✅ |
+| 0x82650080 | 476 | `XMsgStartIORequest` | 1 |  | ✅ |
+| 0x82650260 | 580 | `XMsgInProcessCall`, `XMsgStartIORequest` | 1 | XMsg: 0x58017 ao app 0xFC | ✅ |
+| 0x826504A8 | 552 | `XMsgStartIORequest` | 0 |  | ✅ |
+| 0x826506D0 | 548 | `XMsgStartIORequest` | 0 |  | ✅ |
+| 0x826508F8 | 68 | `XMsgInProcessCall` | 0 | XMsg: 0x58004 ao app 0xFC | ✅ |
+| 0x82650AE8 | 68 | `XMsgInProcessCall` | 4 | XMsg: 0x58006 ao app 0xFC | ✅ |
+| 0x82650B30 | 164 | `XMsgInProcessCall` | 0 | XMsg: 0x58007 ao app 0xFC | ✅ |
+| 0x82650C60 | 84 | `XMsgInProcessCall` | 0 | XMsg: 0x58052 ao app 0xFC | ✅ |
+| 0x82650D90 | 252 | `XMsgInProcessCall` | 17 | XMsg: 0x58004 ao app 0xFC | ✅ |
+| 0x82650F68 | 100 | `XMsgInProcessCall` | 2 | XMsg: 0x58072 ao app 0xFC | ✅ |
+| 0x82650FD0 | 276 | `XMsgStartIORequest` | 0 | XMsg: 0x5806A ao app 0xFC | ✅ |
+| 0x826510E8 | 260 | `XMsgStartIORequest` | 0 | XMsg: 0x5806B ao app 0xFC | ✅ |
+| 0x826511F0 | 96 | `XMsgStartIORequest` | 0 | XMsg: 0x5806C ao app 0xFC | ✅ |
+| 0x82651250 | 96 | `XMsgStartIORequest` | 0 | XMsg: 0x5806D ao app 0xFC | ✅ |
+| 0x826512B0 | 88 | `XMsgStartIORequest` | 0 | XMsg: 0x5806E ao app 0xFC | ✅ |
+| 0x82651308 | 60 | `XMsgStartIORequest` | 0 | XMsg: 0x5806F ao app 0xFC | ✅ |
+| 0x82996488 | 152 | `XamAvatarGetManifestLocalUser` | 1 |  | ✅ |
+| 0x829965D0 | 168 | `XamAvatarGetMetadataRandom` | 1 |  | ✅ |
+| 0x829966C8 | 144 | `XamAvatarGetMetadataSignedOutProfile` | 0 |  | ✅ |
+| 0x82996EA0 | 448 | `XamAvatarManifestGetBodyType` | 1 |  | ✅ |
+| 0x82997268 | 248 | `XamAvatarGetAssets` | 1 |  | ✅ |
+| 0x82997448 | 172 | `XamAvatarGenerateMipMaps` | 1 |  | ✅ |
+| 0x82998248 | 220 | `XamAvatarLoadAnimation` | 1 |  | ✅ |
+| 0x82998768 | 124 | `XamAvatarShutdown` | 1 |  | ✅ |
+| 0x829987E8 | 376 | `XamAvatarInitialize` | 1 |  | ✅ |
+| 0x8299B018 | 532 | `XamAvatarManifestGetBodyType` | 2 |  | ✅ |
+| 0x82B6C7F0 | 56 | `XamShowNuiMessageBoxUI` | 1 | `XamShowNuiMessageBoxUI`: NuiHudCheck + caixa de mensagem com flag 0x2000 | ✅ |
+| 0x82B6CB90 | 232 | `XMsgStartIORequest` | 0 | XMsg: 0x20021 ao app 0xFE (xam) | ✅ |
+| 0x82B6CCB8 | 100 | `XMsgStartIORequest` | 0 | XMsg: 0x2000B ao app 0xFE (xam) | ✅ |
+| 0x82B6CD20 | 132 | `XMsgStartIORequest` | 0 | XMsg: 0x2000D ao app 0xFE (xam) | ✅ |
+| 0x82B6CDE0 | 68 | `XamShowVoiceMailUI` | 0 |  | ✅ |
+| 0x82B6D478 | 120 | `XMsgStartIORequest` | 1 | XMsg: 0xB0008 ao app 0xFB (Live) | ✅ |
+| 0x82B6D4F0 | 120 | `XMsgStartIORequest` | 1 | XMsg: 0xB0071 ao app 0xFB (Live) | ✅ |
+| 0x82B6D570 | 140 | `XMsgStartIORequest` | 0 | XMsg: 0xB0006 ao app 0xFB (Live) | ✅ |
+| 0x82B6D608 | 184 | `XMsgStartIORequest` | 0 | XMsg: 0xB0007 ao app 0xFB (Live) | ✅ |
+| 0x82B6D770 | 124 | `XMsgStartIORequest` | 0 | XMsg: 0xB0020 ao app 0xFB (Live) | ✅ |
+| 0x82B6D800 | 216 | `XMsgStartIORequest` | 1 | XMsg: 0xB0021 ao app 0xFB (Live) | ✅ |
+| 0x82B6FBF0 | 56 | `XMsgSystemProcessCall` | 0 | XMsg: 0x2B001 (NUI) | ✅ |
+| 0x82B6FC70 | 40 | `XamNuiGetDeviceStatus` | 2 | `XamNuiGetDeviceStatus`: FUN_817FC750 (estado, NTSTATUS do sensor e flags); sensor desligado: 0xC000009D | ✅ |
+| 0x82B70370 | 60 | `XMsgSystemProcessCall` | 1 | XMsg: 0x2C001 ao app 0xFE (xam) | ✅ |
+| 0x82B703B0 | 72 | `XMsgSystemProcessCall` | 1 | XMsg: 0x2C003 ao app 0xFE (xam) | ✅ |
+| 0x82B703F8 | 72 | `XMsgSystemProcessCall` | 1 | XMsg: 0x2C004 ao app 0xFE (xam) | ✅ |
+| 0x82B70440 | 64 | `XMsgSystemProcessCall` | 1 | XMsg: 0x2C005 ao app 0xFE (xam) | ✅ |
+| 0x82B70480 | 56 | `XMsgInProcessCall` | 2 | XMsg: registra o callback de identidade (0x2C009) | ✅ |
+| 0x82B704B8 | 76 | `XMsgInProcessCall` | 9 | XMsg: dados de identidade (0x2C00C) | ✅ |
+| 0x82B70508 | 68 | `XMsgInProcessCall` | 1 | XMsg: resolve o cadastro (0x2C00D) | ✅ |
+| 0x82B74AA0 | 80 | `XMsgStartIORequest` | 1 | XMsg: biometria desligada (0x2A009) | ✅ |
+| 0x82B74AF0 | 112 | `XMsgStartIORequest` | 3 | XMsg: lê o cache biométrico (0x2A008) | ✅ |
+| 0x82B74B60 | 100 | `XMsgStartIORequest` | 2 | XMsg: grava o cache biométrico (0x2A007) | ✅ |
+| 0x82B74BC8 | 80 | `XMsgStartIORequest` | 2 | XMsg: 0x2A006 ao app 0xFE (xam) | ✅ |
+| 0x82B74C18 | 112 | `XMsgStartIORequest` | 1 | XMsg: 0x2A005 ao app 0xFE (xam) | ✅ |
+| 0x82B74C88 | 100 | `XMsgStartIORequest` | 1 | XMsg: 0x2A004 ao app 0xFE (xam) | ✅ |
+| 0x82B76078 | 40 | `XMsgCancelIORequest` | 17 |  | ✅ |
+| 0x82B77CD8 | 264 | `XMsgCompleteIORequest`, `XMsgInProcessCall` | 0 |  | ✅ |
+| 0x82B77F08 | 68 | `XMsgInProcessCall` | 0 | XMsg: 0x21012 ao app 0xFE (xam) | ✅ |
+| 0x82D14E60 | 80 | `XMsgStartIORequestEx` | 0 |  | ✅ |
+| 0x82D14EB0 | 144 | `XMsgStartIORequest` | 0 | XMsg: 0x7000E ao app 0xFA | ✅ |
+| 0x82D14F40 | 148 | `XMsgStartIORequest` | 0 | XMsg: 0x70008 ao app 0xFA | ✅ |
+| 0x82D14FD8 | 108 | `XMsgInProcessCall` | 0 | XMsg: 0x70029 ao app 0xFA | ✅ |
+| 0x82D15048 | 100 | `XMsgInProcessCall` | 0 | XMsg: 0x70009 ao app 0xFA | ✅ |
+| 0x82D150B0 | 100 | `XMsgInProcessCall` | 0 | XMsg: 0x7000B ao app 0xFA | ✅ |
+| 0x82D15118 | 136 | `XMsgStartIORequest` | 0 | XMsg: 0x7000C ao app 0xFA | ✅ |
+| 0x82D151A0 | 168 | `XMsgStartIORequestEx` | 0 | XMsg: 0x7001A ao app 0xFA | ✅ |
+| 0x82D15248 | 168 | `XMsgStartIORequestEx` | 0 | XMsg: 0x70068 ao app 0xFA | ✅ |
+| 0x82D152F0 | 104 | `XMsgInProcessCall` | 1 | XMsg: 0x7001B ao app 0xFA | ✅ |
+| 0x82D1A5A8 | 376 | `XAudioGetVoiceCategoryVolume` | 0 |  | ✅ |
+| 0x82F403E8 | 152 | `XMsgInProcessCall` | 1 | XMsg: 0x58035 ao app 0xFC | ✅ |
+| 0x82F40480 | 152 | `XMsgInProcessCall` | 0 | XMsg: 0x58035 ao app 0xFC | ✅ |
+| 0x82F40688 | 432 | `XMsgStartIORequest` | 4 | XMsg: 0xB0010 ao app 0xFB (Live) | ✅ |
+| 0x82F40838 | 188 | `XMsgStartIORequest` | 1 | XMsg: 0xB0018 ao app 0xFB (Live) | ✅ |
+| 0x82F408F8 | 176 | `XMsgStartIORequest` | 6 | XMsg: 0xB0011 ao app 0xFB (Live) | ✅ |
+| 0x82F409A8 | 172 | `XMsgStartIORequest` | 5 | XMsg: 0xB0012 ao app 0xFB (Live) | ✅ |
+| 0x82F40A58 | 172 | `XMsgStartIORequest` | 2 | XMsg: 0xB0012 ao app 0xFB (Live) | ✅ |
+| 0x82F40B08 | 168 | `XMsgStartIORequest` | 2 | XMsg: 0xB0013 ao app 0xFB (Live) | ✅ |
+| 0x82F40BB0 | 168 | `XMsgStartIORequest` | 4 | XMsg: 0xB0013 ao app 0xFB (Live) | ✅ |
+| 0x82F40C58 | 220 | `XMsgStartIORequest` | 1 | XMsg: 0xB001A ao app 0xFB (Live) | ✅ |
+| 0x82F40D38 | 156 | `XMsgStartIORequest` | 4 | XMsg: 0xB0014 ao app 0xFB (Live) | ✅ |
+| 0x82F40DD8 | 176 | `XMsgStartIORequest` | 5 | XMsg: 0xB0015 ao app 0xFB (Live) | ✅ |
+| 0x82F40E88 | 228 | `XMsgStartIORequest` | 0 | XMsg: 0xB0016 ao app 0xFB (Live) | ✅ |
+| 0x82F40F70 | 232 | `XMsgStartIORequest` | 2 | XMsg: 0xB001C ao app 0xFB (Live) | ✅ |
+| 0x82F41058 | 280 | `XMsgStartIORequest` | 0 | XMsg: 0xB0065 ao app 0xFB (Live) | ✅ |
+| 0x82F41170 | 220 | `XMsgStartIORequest` | 2 | XMsg: 0xB001B ao app 0xFB (Live) | ✅ |
+| 0x82F41250 | 84 | `XMsgInProcessCall` | 0 | XMsg: 0xB0019 ao app 0xFB (Live) | ✅ |
+| 0x82F412A8 | 164 | `XMsgStartIORequest` | 1 | XMsg: 0xB0026 ao app 0xFB (Live) | ✅ |
+| 0x82F413D0 | 192 | `XMsgStartIORequest` | 2 | XMsg: 0xB0025 ao app 0xFB (Live) | ✅ |
+| 0x82F41490 | 108 | `XMsgInProcessCall` | 0 | XMsg: 0x58032 ao app 0xFC | ✅ |
+| 0x82F83410 | 200 | `XamVoiceIsActiveProcess` | 3 | `XamVoiceIsActiveProcess`: kernel XVoiced* | ✅ |
+| 0x82F870C8 | 928 | `XamVoiceHeadsetPresent`, `XamVoiceIsActiveProcess` | 1 | `XamVoiceHeadsetPresent`: kernel XVoiced*; `XamVoiceIsActiveProcess`: kernel XVoiced* | ✅ |
+| 0x82F87708 | 316 | `XMsgCancelIORequest`, `XamVoiceClose` | 2 | `XamVoiceClose`: voz (kernel XVoiced*) | ✅ |
+| 0x82F87A98 | 600 | `XamVoiceSubmitPacket` | 1 | `XamVoiceSubmitPacket`: kernel XVoiced* | ✅ |
+| 0x82F87DF8 | 240 | `XMsgCancelIORequest`, `XamVoiceClose` | 2 | `XamVoiceClose`: voz (kernel XVoiced*) | ✅ |
+| 0x82F87EE8 | 192 | `XamVoiceClose`, `XamVoiceCreate` | 1 | `XamVoiceClose`: voz (kernel XVoiced*); `XamVoiceCreate`: voz (kernel XVoiced*) | ✅ |
+| 0x82F89C20 | 688 | `XamVoiceIsActiveProcess` | 3 | `XamVoiceIsActiveProcess`: kernel XVoiced* | ✅ |
+| 0x82F8F620 | 208 | `XamVoiceSubmitPacket` | 2 | `XamVoiceSubmitPacket`: kernel XVoiced* | ✅ |
+| 0x82F973F0 | 292 | `XUsbcamCreate` | 3 |  | ✅ |
+| 0x82F97518 | 160 | `XUsbcamDestroy` | 5 |  | ✅ |
+| 0x82F975C8 | 92 | `XUsbcamGetState` | 3 |  | ✅ |
+| 0x82F978A8 | 332 | `XUsbcamSetConfig` | 2 |  | ✅ |
+| 0x82F97A38 | 236 | `XUsbcamSetView` | 1 |  | ✅ |
+| 0x82F97D20 | 284 | `XUsbcamSetCaptureMode` | 0 |  | ✅ |
+| 0x82F97E40 | 240 | `XUsbcamReadFrame` | 0 |  | ✅ |
+| 0x82F99C90 | 432 | `XUsbcamSetConfig` | 0 |  | ✅ |
+| 0x82F99E40 | 428 | `XUsbcamSetConfig` | 1 |  | ✅ |
+| 0x83245F08 | 72 | `XMsgInProcessCall` | 1 | XMsg: 0x5800E ao app 0xFC | ✅ |
+| 0x83245F50 | 88 | `XMsgInProcessCall` | 0 |  | ✅ |
+| 0x83245FA8 | 248 | `XMsgStartIORequest` | 1 | XMsg: 0xB001E ao app 0xFB (Live) | ✅ |
+| 0x83246100 | 304 | `XMsgStartIORequest` | 0 | XMsg: 0xB001D ao app 0xFB (Live) | ✅ |
+
+</details>
+
+### Importações do Kinect, NUI, voz e avatares
+
+| Importação | Biblioteca, ordinal | Chamadas no código | Em execução | Xenia |
+|---|---|---|---|---|
+| `PsCamDeviceRequest` | xboxkrnl 0x30D | 1 | 0 | ✅ |
+| `XAudioGetVoiceCategoryVolume` | xboxkrnl 0x1F8 | 1 | 0 | ⚪ stub |
+| `XMsgCancelIORequest` | xam 0x1F8 | 5 | 0 | ✅ |
+| `XMsgCompleteIORequest` | xam 0x1F5 | 1 | 0 | 🟡 |
+| `XMsgInProcessCall` | xam 0x1F4 | 31 | 0 | ✅ |
+| `XMsgStartIORequest` | xam 0x1F7 | 53 | 0 | ✅ |
+| `XMsgStartIORequestEx` | xam 0x1FC | 3 | 0 | ✅ |
+| `XMsgSystemProcessCall` | xam 0x1F6 | 5 | 0 | ✅ |
+| `XUsbcamCreate` | xboxkrnl 0x222 | 1 | 0 | ⚪ stub |
+| `XUsbcamDestroy` | xboxkrnl 0x223 | 1 | 0 | ❌ |
+| `XUsbcamGetConfig` | xboxkrnl 0x21B | 2 | 0 | ❌ |
+| `XUsbcamGetState` | xboxkrnl 0x21D | 1 | 0 | ⚪ stub |
+| `XUsbcamGetView` | xboxkrnl 0x221 | 1 | 0 | ❌ |
+| `XUsbcamReadFrame` | xboxkrnl 0x21E | 1 | 0 | ❌ |
+| `XUsbcamReset` | xboxkrnl 0x264 | 1 | 0 | ❌ |
+| `XUsbcamSetCaptureMode` | xboxkrnl 0x21A | 1 | 0 | ❌ |
+| `XUsbcamSetConfig` | xboxkrnl 0x21C | 3 | 0 | ❌ |
+| `XUsbcamSetView` | xboxkrnl 0x220 | 1 | 0 | ❌ |
+| `XUsbcamSnapshot` | xboxkrnl 0x21F | 1 | 0 | ❌ |
+| `XamAvatarGenerateMipMaps` | xam 0x5E2 | 2 | 0 | ⚪ stub |
+| `XamAvatarGetAssets` | xam 0x5E1 | 2 | 0 | 🟡 |
+| `XamAvatarGetAssetsResultSize` | xam 0x5E0 | 1 | 0 | ✅ |
+| `XamAvatarGetManifestLocalUser` | xam 0x5DE | 1 | 0 | 🟡 |
+| `XamAvatarGetManifestsByXuid` | xam 0x5DF | 1 | 0 | ⚪ stub |
+| `XamAvatarGetMetadataRandom` | xam 0x5EB | 1 | 0 | ✅ |
+| `XamAvatarGetMetadataSignedOutProfile` | xam 0x5EF | 1 | 0 | ⚪ stub |
+| `XamAvatarGetMetadataSignedOutProfileCount` | xam 0x5EE | 1 | 0 | ⚪ stub |
+| `XamAvatarInitialize` | xam 0x5DC | 1 | 0 | ✅ |
+| `XamAvatarLoadAnimation` | xam 0x5E7 | 1 | 0 | 🟡 |
+| `XamAvatarManifestGetBodyType` | xam 0x5F1 | 4 | 0 | ✅ |
+| `XamAvatarSetCustomAsset` | xam 0x5E3 | 1 | 0 | 🟡 |
+| `XamAvatarShutdown` | xam 0x5DD | 1 | 0 | 🟡 |
+| `XamCacheCloseFile` | xam 0x2B5 | 1 | 0 | 🟡 |
+| `XamCacheOpenFile` | xam 0x2B4 | 1 | 0 | 🟡 |
+| `XamCacheReset` | xam 0x2B7 | 1 | 0 | 🟡 |
+| `XamNuiCameraElevationGetAngle` | xam 0x881 | 2 | 0 | ✅ |
+| `XamNuiCameraElevationSetAngle` | xam 0x880 | 2 | 0 | ✅ |
+| `XamNuiCameraElevationStopMovement` | xam 0x883 | 3 | 0 | ✅ |
+| `XamNuiCameraRememberFloor` | xam 0x865 | 2 | 0 | ✅ |
+| `XamNuiCameraTiltGetStatus` | xam 0x870 | 1 | 0 | ✅ |
+| `XamNuiCameraTiltReportStatus` | xam 0x895 | 7 | 0 | ✅ |
+| `XamNuiCameraTiltSetCallback` | xam 0x86D | 1 | 0 | ✅ |
+| `XamNuiGetDeviceStatus` | xam 0x885 | 1 | 0 | ✅ |
+| `XamNuiIdentityGetSessionId` | xam 0x873 | 6 | 0 | ✅ |
+| `XamReadBiometricData` | xam 0x849 | 3 | 0 | ✅ |
+| `XamShowGameVoiceChannelUI` | xam 0x3C5 | 2 | 0 | ❌ |
+| `XamShowNuiAchievementsUI` | xam 0x46E | 1 | 0 | ✅ |
+| `XamShowNuiCommunitySessionsUI` | xam 0x46F | 1 | 0 | ✅ |
+| `XamShowNuiControllerRequiredUI` | xam 0x47B | 1 | 0 | ✅ |
+| `XamShowNuiDeviceSelectorUI` | xam 0x470 | 1 | 0 | 🟡 |
+| `XamShowNuiDirtyDiscErrorUI` | xam 0x471 | 1 | 0 | ⚪ stub |
+| `XamShowNuiFriendRequestUI` | xam 0x479 | 1 | 0 | ✅ |
+| `XamShowNuiFriendsUI` | xam 0x472 | 1 | 0 | ✅ |
+| `XamShowNuiGameInviteUI` | xam 0x473 | 1 | 0 | ✅ |
+| `XamShowNuiGamerCardUIForXUID` | xam 0x474 | 1 | 0 | 🟡 |
+| `XamShowNuiGuideUI` | xam 0x356 | 1 | 0 | ✅ |
+| `XamShowNuiHardwareRequiredUI` | xam 0x47D | 1 | 0 | ✅ |
+| `XamShowNuiMarketplaceUI` | xam 0x476 | 1 | 0 | 🟡 |
+| `XamShowNuiMessageBoxUI` | xam 0x477 | 1 | 0 | 🟡 |
+| `XamShowNuiPartyUI` | xam 0x478 | 1 | 0 | ✅ |
+| `XamShowNuiSigninUI` | xam 0x47A | 1 | 0 | 🟡 |
+| `XamShowNuiTroubleshooterUI` | xam 0x46B | 1 | 0 | ✅ |
+| `XamShowVoiceMailUI` | xam 0x2C3 | 1 | 0 | ❌ |
+| `XamUserNuiEnableBiometric` | xam 0x863 | 1 | 0 | ✅ |
+| `XamUserNuiGetEnrollmentIndex` | xam 0x86A | 1 | 0 | ✅ |
+| `XamUserNuiGetUserIndex` | xam 0x869 | 3 | 0 | ✅ |
+| `XamVoiceClose` | xam 0x30F | 3 | 0 | ⚪ stub |
+| `XamVoiceCreate` | xam 0x30C | 1 | 0 | ⚪ stub |
+| `XamVoiceHeadsetPresent` | xam 0x30D | 1 | 0 | ⚪ stub |
+| `XamVoiceIsActiveProcess` | xam 0x497 | 3 | 0 | ⚪ stub |
+| `XamVoiceSubmitPacket` | xam 0x30E | 2 | 0 | ⚪ stub |
+| `XamWriteBiometricData` | xam 0x84A | 1 | 0 | ✅ |
+
+### Todas as importações, por área
+
+<details><summary><b>Rede</b> (101)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `NetDll_WSACancelOverlappedIO` | xam 0x11 | 1 | 0 | ❌ |
+| `NetDll_WSACleanup` | xam 0x2 | 1 | 0 | ✅ |
+| `NetDll_WSACloseEvent` | xam 0x1E | 1 | 0 | ✅ |
+| `NetDll_WSACreateEvent` | xam 0x1D | 1 | 0 | ✅ |
+| `NetDll_WSAEventSelect` | xam 0x23 | 1 | 0 | ✅ |
+| `NetDll_WSAGetLastError` | xam 0x1B | 1 | 0 | ✅ |
+| `NetDll_WSAGetOverlappedResult` | xam 0x10 | 1 | 0 | ✅ |
+| `NetDll_WSARecv` | xam 0x13 | 1 | 0 | ❌ |
+| `NetDll_WSARecvFrom` | xam 0x15 | 1 | 0 | ✅ |
+| `NetDll_WSAResetEvent` | xam 0x20 | 1 | 0 | ✅ |
+| `NetDll_WSASend` | xam 0x17 | 1 | 0 | ❌ |
+| `NetDll_WSASendTo` | xam 0x19 | 1 | 0 | ✅ |
+| `NetDll_WSASetEvent` | xam 0x1F | 1 | 0 | ✅ |
+| `NetDll_WSASetLastError` | xam 0x1C | 1 | 0 | ✅ |
+| `NetDll_WSAStartup` | xam 0x1 | 1 | 0 | ✅ |
+| `NetDll_WSAWaitForMultipleEvents` | xam 0x21 | 1 | 0 | ✅ |
+| `NetDll_XNetCleanup` | xam 0x34 | 1 | 0 | ✅ |
+| `NetDll_XNetConnect` | xam 0x41 | 1 | 0 | ✅ |
+| `NetDll_XNetCreateKey` | xam 0x36 | 1 | 0 | ✅ |
+| `NetDll_XNetDnsLookup` | xam 0x43 | 1 | 0 | ✅ |
+| `NetDll_XNetDnsRelease` | xam 0x44 | 1 | 0 | ⚪ stub |
+| `NetDll_XNetDnsReverseLookup` | xam 0x55 | 1 | 0 | ❌ |
+| `NetDll_XNetDnsReverseRelease` | xam 0x56 | 1 | 0 | ❌ |
+| `NetDll_XNetGetBroadcastVersionStatus` | xam 0x4C | 1 | 0 | ✅ |
+| `NetDll_XNetGetConnectStatus` | xam 0x42 | 1 | 0 | ✅ |
+| `NetDll_XNetGetDebugXnAddr` | xam 0x4A | 1 | 0 | ⚪ stub |
+| `NetDll_XNetGetEthernetLinkStatus` | xam 0x4B | 1 | 0 | ✅ |
+| `NetDll_XNetGetOpt` | xam 0x4E | 1 | 0 | 🟡 |
+| `NetDll_XNetGetSystemLinkPort` | xam 0x53 | 1 | 0 | ✅ |
+| `NetDll_XNetGetTitleXnAddr` | xam 0x49 | 1 | 0 | ✅ |
+| `NetDll_XNetGetXnAddrPlatform` | xam 0x52 | 1 | 0 | ❌ |
+| `NetDll_XNetInAddrToServer` | xam 0x3D | 1 | 0 | ❌ |
+| `NetDll_XNetInAddrToString` | xam 0x3E | 1 | 0 | ✅ |
+| `NetDll_XNetInAddrToXnAddr` | xam 0x3C | 1 | 0 | ✅ |
+| `NetDll_XNetQosGetListenStats` | xam 0x4D | 1 | 0 | ❌ |
+| `NetDll_XNetQosListen` | xam 0x45 | 1 | 0 | ✅ |
+| `NetDll_XNetQosLookup` | xam 0x46 | 1 | 0 | ✅ |
+| `NetDll_XNetQosRelease` | xam 0x48 | 1 | 0 | ✅ |
+| `NetDll_XNetQosServiceLookup` | xam 0x47 | 1 | 0 | ⚪ stub |
+| `NetDll_XNetRandom` | xam 0x35 | 1 | 0 | ✅ |
+| `NetDll_XNetRegisterKey` | xam 0x37 | 1 | 0 | ✅ |
+| `NetDll_XNetReplaceKey` | xam 0x51 | 1 | 0 | ❌ |
+| `NetDll_XNetServerToInAddr` | xam 0x3A | 1 | 0 | ❌ |
+| `NetDll_XNetSetOpt` | xam 0x4F | 1 | 0 | ❌ |
+| `NetDll_XNetSetSystemLinkPort` | xam 0x54 | 1 | 0 | ✅ |
+| `NetDll_XNetStartup` | xam 0x33 | 1 | 0 | ✅ |
+| `NetDll_XNetTsAddrToInAddr` | xam 0x3B | 1 | 0 | ❌ |
+| `NetDll_XNetUnregisterInAddr` | xam 0x3F | 1 | 0 | ✅ |
+| `NetDll_XNetUnregisterKey` | xam 0x38 | 1 | 0 | ✅ |
+| `NetDll_XNetXnAddrToInAddr` | xam 0x39 | 1 | 0 | ✅ |
+| `NetDll_XNetXnAddrToMachineId` | xam 0x40 | 1 | 0 | ✅ |
+| `NetDll_XnpCapture` | xam 0x6C | 1 | 0 | ❌ |
+| `NetDll_XnpConfig` | xam 0x68 | 1 | 0 | ❌ |
+| `NetDll_XnpConfigUPnP` | xam 0x67 | 1 | 0 | ❌ |
+| `NetDll_XnpEthernetInterceptRecv` | xam 0x6F | 1 | 0 | ❌ |
+| `NetDll_XnpEthernetInterceptSetCallbacks` | xam 0x6D | 1 | 0 | ❌ |
+| `NetDll_XnpEthernetInterceptXmit` | xam 0x6E | 1 | 0 | ❌ |
+| `NetDll_XnpGetActiveSocketList` | xam 0x7A | 1 | 0 | ❌ |
+| `NetDll_XnpGetConfigStatus` | xam 0x69 | 1 | 0 | ❌ |
+| `NetDll_XnpGetVlanXboxName` | xam 0x78 | 1 | 0 | ❌ |
+| `NetDll_XnpLoadConfigParams` | xam 0x65 | 1 | 0 | ❌ |
+| `NetDll_XnpLoadMachineAccount` | xam 0x6A | 1 | 0 | ❌ |
+| `NetDll_XnpLogonClearQEvent` | xam 0x74 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonGetQFlags` | xam 0x71 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonGetQVals` | xam 0x75 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonGetStatus` | xam 0x70 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonSetPState` | xam 0x77 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonSetQEvent` | xam 0x73 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonSetQFlags` | xam 0x72 | 1 | 0 | ❌ |
+| `NetDll_XnpLogonSetQVals` | xam 0x76 | 1 | 0 | ❌ |
+| `NetDll_XnpNoteSystemTime` | xam 0x7B | 1 | 0 | ❌ |
+| `NetDll_XnpRegisterKeyForCallerType` | xam 0x7C | 1 | 0 | ❌ |
+| `NetDll_XnpSaveConfigParams` | xam 0x66 | 1 | 0 | ❌ |
+| `NetDll_XnpSaveMachineAccount` | xam 0x6B | 1 | 0 | ❌ |
+| `NetDll_XnpSetVlanXboxName` | xam 0x79 | 1 | 0 | ❌ |
+| `NetDll_XnpUnregisterKeyForCallerType` | xam 0x7D | 1 | 0 | ❌ |
+| `NetDll___WSAFDIsSet` | xam 0x22 | 1 | 0 | ✅ |
+| `NetDll_accept` | xam 0xE | 1 | 0 | ✅ |
+| `NetDll_bind` | xam 0xB | 1 | 0 | ✅ |
+| `NetDll_closesocket` | xam 0x4 | 1 | 0 | ✅ |
+| `NetDll_connect` | xam 0xC | 1 | 0 | ✅ |
+| `NetDll_getpeername` | xam 0xA | 1 | 0 | ✅ |
+| `NetDll_getsockname` | xam 0x9 | 1 | 0 | ✅ |
+| `NetDll_getsockopt` | xam 0x8 | 1 | 0 | ✅ |
+| `NetDll_inet_addr` | xam 0x1A | 1 | 0 | ✅ |
+| `NetDll_ioctlsocket` | xam 0x6 | 1 | 0 | ✅ |
+| `NetDll_listen` | xam 0xD | 1 | 0 | ✅ |
+| `NetDll_recv` | xam 0x12 | 1 | 0 | ✅ |
+| `NetDll_recvfrom` | xam 0x14 | 1 | 0 | ✅ |
+| `NetDll_select` | xam 0xF | 1 | 0 | ✅ |
+| `NetDll_send` | xam 0x16 | 1 | 0 | ✅ |
+| `NetDll_sendto` | xam 0x18 | 1 | 0 | ✅ |
+| `NetDll_setsockopt` | xam 0x7 | 1 | 0 | ✅ |
+| `NetDll_shutdown` | xam 0x5 | 1 | 0 | ✅ |
+| `NetDll_socket` | xam 0x3 | 1 | 0 | ✅ |
+| `XNetLogonGetMachineID` | xam 0x135 | 3 | 0 | ⚪ stub |
+| `XNetLogonGetTitleID` | xam 0x136 | 7 | 0 | ✅ |
+| `XamXlfsInitializeUploadQueue` | xam 0x482 | 1 | 0 | ❌ |
+| `XamXlfsMountUploadQueueInstance` | xam 0x484 | 1 | 0 | ❌ |
+| `XamXlfsUninitializeUploadQueue` | xam 0x483 | 1 | 0 | ❌ |
+| `XamXlfsUnmountUploadQueueInstance` | xam 0x485 | 1 | 0 | ❌ |
+
+</details>
+
+<details><summary><b>Threads, sincronização e tempo</b> (73)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `ExAcquireReadWriteLockExclusive` | xboxkrnl 0x7 | 2 | 0 | ✅ |
+| `ExAcquireReadWriteLockShared` | xboxkrnl 0x8 | 7 | 0 | ✅ |
+| `ExCreateThread` | xboxkrnl 0xD | 3 | 0 | ✅ |
+| `ExEventObjectType` | xboxkrnl 0xE | 0 | 0 | ✅ |
+| `ExInitializeReadWriteLock` | xboxkrnl 0x11 | 1 | 0 | ✅ |
+| `ExReleaseReadWriteLock` | xboxkrnl 0x16 | 8 | 0 | ✅ |
+| `ExSemaphoreObjectType` | xboxkrnl 0x17 | 0 | 0 | ✅ |
+| `ExTerminateThread` | xboxkrnl 0x19 | 3 | 0 | ✅ |
+| `ExThreadObjectType` | xboxkrnl 0x1B | 0 | 0 | ✅ |
+| `ExTimerObjectType` | xboxkrnl 0x1C | 0 | 0 | ✅ |
+| `InterlockedFlushSList` | xboxkrnl 0x2B | 10 | 0 | ✅ |
+| `InterlockedPopEntrySList` | xboxkrnl 0x2C | 20 | 0 | ✅ |
+| `KeAcquireSpinLockAtRaisedIrql` | xboxkrnl 0x4D | 1 | 0 | ✅ |
+| `KeBugCheck` | xboxkrnl 0x52 | 12 | 0 | ✅ |
+| `KeBugCheckEx` | xboxkrnl 0x53 | 10 | 0 | ⚪ stub |
+| `KeCertMonitorData` | xboxkrnl 0x266 | 0 | 0 | ✅ |
+| `KeDebugMonitorData` | xboxkrnl 0x59 | 0 | 0 | ✅ |
+| `KeDelayExecutionThread` | xboxkrnl 0x5A | 4 | 0 | ✅ |
+| `KeEnableFpuExceptions` | xboxkrnl 0x5D | 1 | 0 | ⚪ stub |
+| `KeEnterCriticalRegion` | xboxkrnl 0x5F | 3 | 0 | ✅ |
+| `KeGetCurrentProcessType` | xboxkrnl 0x66 | 105 | 0 | ✅ |
+| `KeInitializeApc` | xboxkrnl 0x6D | 3 | 0 | ✅ |
+| `KeInitializeDpc` | xboxkrnl 0x6F | 1 | 0 | 🟡 |
+| `KeInitializeMutant` | xboxkrnl 0x72 | 1 | 0 | ✅ |
+| `KeInsertQueueApc` | xboxkrnl 0x7A | 3 | 0 | ✅ |
+| `KeInsertQueueDpc` | xboxkrnl 0x7B | 8 | 0 | 🟡 |
+| `KeLeaveCriticalRegion` | xboxkrnl 0x7D | 3 | 0 | ✅ |
+| `KeLockL2` | xboxkrnl 0x6B | 1 | 0 | 🟡 |
+| `KeQueryBasePriorityThread` | xboxkrnl 0x81 | 1 | 0 | ✅ |
+| `KeQueryPerformanceFrequency` | xboxkrnl 0x83 | 6 | 0 | ✅ |
+| `KeQuerySystemTime` | xboxkrnl 0x84 | 4 | 0 | ✅ |
+| `KeReleaseMutant` | xboxkrnl 0x87 | 35 | 0 | ✅ |
+| `KeReleaseSpinLockFromRaisedIrql` | xboxkrnl 0x89 | 1 | 0 | ✅ |
+| `KeResetEvent` | xboxkrnl 0x8F | 26 | 0 | ✅ |
+| `KeRestoreFloatingPointState` | xboxkrnl 0x90 | 1 | 0 | 🟡 |
+| `KeResumeThread` | xboxkrnl 0x92 | 2 | 0 | ✅ |
+| `KeSaveFloatingPointState` | xboxkrnl 0x95 | 1 | 0 | 🟡 |
+| `KeSetAffinityThread` | xboxkrnl 0x97 | 2 | 0 | ✅ |
+| `KeSetBasePriorityThread` | xboxkrnl 0x99 | 6 | 0 | ✅ |
+| `KeSetCurrentProcessType` | xboxkrnl 0x9A | 2 | 0 | ✅ |
+| `KeSetDisableBoostThread` | xboxkrnl 0x9C | 1 | 0 | ✅ |
+| `KeSetEvent` | xboxkrnl 0x9D | 101 | 0 | ✅ |
+| `KeTimeStampBundle` | xboxkrnl 0xAD | 0 | 0 | ✅ |
+| `KeTlsAlloc` | xboxkrnl 0x152 | 7 | 0 | ✅ |
+| `KeTlsFree` | xboxkrnl 0x153 | 7 | 0 | ✅ |
+| `KeTlsGetValue` | xboxkrnl 0x154 | 13 | 0 | ✅ |
+| `KeTlsSetValue` | xboxkrnl 0x155 | 17 | 0 | ✅ |
+| `KeUnlockL2` | xboxkrnl 0x6C | 2 | 0 | 🟡 |
+| `KeWaitForMultipleObjects` | xboxkrnl 0xAF | 7 | 0 | ✅ |
+| `KeWaitForSingleObject` | xboxkrnl 0xB0 | 20 | 0 | ✅ |
+| `KfAcquireSpinLock` | xboxkrnl 0xB1 | 44 | 0 | ✅ |
+| `KfReleaseSpinLock` | xboxkrnl 0xB4 | 47 | 0 | ✅ |
+| `KiApcNormalRoutineNop` | xboxkrnl 0x1DF | 1 | 0 | ⚪ stub |
+| `NtCancelTimer` | xboxkrnl 0xCD | 1 | 0 | ✅ |
+| `NtClearEvent` | xboxkrnl 0xCE | 5 | 0 | ✅ |
+| `NtPulseEvent` | xboxkrnl 0xE2 | 1 | 0 | ✅ |
+| `NtQueueApcThread` | xboxkrnl 0xE3 | 2 | 0 | ✅ |
+| `NtReleaseMutant` | xboxkrnl 0xF2 | 1 | 0 | ✅ |
+| `NtReleaseSemaphore` | xboxkrnl 0xF3 | 1 | 0 | ✅ |
+| `NtResumeThread` | xboxkrnl 0xF5 | 2 | 0 | ✅ |
+| `NtSignalAndWaitForSingleObjectEx` | xboxkrnl 0xFB | 1 | 0 | ✅ |
+| `NtSuspendThread` | xboxkrnl 0xFC | 1 | 0 | ✅ |
+| `NtWaitForMultipleObjectsEx` | xboxkrnl 0xFE | 1 | 0 | ✅ |
+| `NtWaitForSingleObjectEx` | xboxkrnl 0xFD | 14 | 0 | ✅ |
+| `NtYieldExecution` | xboxkrnl 0x101 | 1 | 0 | ✅ |
+| `RtlEnterCriticalSection` | xboxkrnl 0x125 | 799 | 0 | ✅ |
+| `RtlInitializeCriticalSection` | xboxkrnl 0x12E | 118 | 0 | ✅ |
+| `RtlInitializeCriticalSectionAndSpinCount` | xboxkrnl 0x12F | 7 | 0 | ✅ |
+| `RtlLeaveCriticalSection` | xboxkrnl 0x130 | 847 | 0 | ✅ |
+| `RtlTimeFieldsToTime` | xboxkrnl 0x13F | 5 | 0 | ✅ |
+| `RtlTimeToTimeFields` | xboxkrnl 0x140 | 5 | 0 | ✅ |
+| `RtlTryEnterCriticalSection` | xboxkrnl 0x141 | 5 | 0 | ✅ |
+| `XexUnloadImageAndExitThread` | xboxkrnl 0x1A2 | 1 | 0 | ❌ |
+
+</details>
+
+<details><summary><b>Conteúdo e armazenamento</b> (54)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `FscGetCacheElementCount` | xboxkrnl 0x20 | 1 | 0 | ⚪ stub |
+| `FscSetCacheElementCount` | xboxkrnl 0x21 | 1 | 0 | ⚪ stub |
+| `MmMapIoSpace` | xboxkrnl 0xC2 | 1 | 0 | ✅ |
+| `NtClose` | xboxkrnl 0xCF | 25 | 0 | ✅ |
+| `NtCreateEvent` | xboxkrnl 0xD1 | 9 | 0 | ✅ |
+| `NtCreateFile` | xboxkrnl 0xD2 | 3 | 0 | ✅ |
+| `NtCreateMutant` | xboxkrnl 0xD4 | 1 | 0 | ✅ |
+| `NtCreateSemaphore` | xboxkrnl 0xD5 | 1 | 0 | ✅ |
+| `NtCreateTimer` | xboxkrnl 0xD7 | 1 | 0 | ✅ |
+| `NtDeviceIoControlFile` | xboxkrnl 0xD9 | 2 | 0 | ⚪ stub |
+| `NtDuplicateObject` | xboxkrnl 0xDA | 1 | 0 | ✅ |
+| `NtFlushBuffersFile` | xboxkrnl 0xDB | 1 | 0 | ✅ |
+| `NtOpenFile` | xboxkrnl 0xDF | 8 | 0 | ✅ |
+| `NtQueryDirectoryFile` | xboxkrnl 0xE4 | 0 | 0 | ✅ |
+| `NtQueryFullAttributesFile` | xboxkrnl 0xE7 | 1 | 0 | ✅ |
+| `NtQueryInformationFile` | xboxkrnl 0xE8 | 1 | 0 | ✅ |
+| `NtQueryVirtualMemory` | xboxkrnl 0xEE | 4 | 0 | ✅ |
+| `NtQueryVolumeInformationFile` | xboxkrnl 0xEF | 1 | 0 | ✅ |
+| `NtReadFile` | xboxkrnl 0xF0 | 0 | 0 | ✅ |
+| `NtReadFileScatter` | xboxkrnl 0xF1 | 0 | 0 | ✅ |
+| `NtSetEvent` | xboxkrnl 0xF6 | 10 | 0 | ✅ |
+| `NtSetInformationFile` | xboxkrnl 0xF7 | 10 | 0 | ✅ |
+| `NtSetTimerEx` | xboxkrnl 0xFA | 1 | 0 | ✅ |
+| `NtWriteFile` | xboxkrnl 0xFF | 4 | 0 | ✅ |
+| `NtWriteFileGather` | xboxkrnl 0x100 | 2 | 0 | ❌ |
+| `ObCreateObject` | xboxkrnl 0x102 | 1 | 0 | ✅ |
+| `ObCreateSymbolicLink` | xboxkrnl 0x103 | 1 | 0 | ✅ |
+| `ObDeleteSymbolicLink` | xboxkrnl 0x104 | 1 | 0 | ✅ |
+| `ObDereferenceObject` | xboxkrnl 0x105 | 66 | 0 | ✅ |
+| `ObLookupThreadByThreadId` | xboxkrnl 0x10B | 1 | 0 | ✅ |
+| `ObOpenObjectByName` | xboxkrnl 0x10D | 3 | 0 | ✅ |
+| `ObOpenObjectByPointer` | xboxkrnl 0x10E | 2 | 0 | ✅ |
+| `ObReferenceObject` | xboxkrnl 0x10F | 3 | 0 | ✅ |
+| `ObReferenceObjectByHandle` | xboxkrnl 0x110 | 25 | 0 | ✅ |
+| `XamCacheCloseFile` | xam 0x2B5 | 1 | 0 | 🟡 |
+| `XamCacheOpenFile` | xam 0x2B4 | 1 | 0 | 🟡 |
+| `XamCacheReset` | xam 0x2B7 | 1 | 0 | 🟡 |
+| `XamContentClose` | xam 0x25A | 5 | 0 | ✅ |
+| `XamContentCreateDeviceEnumerator` | xam 0x25D | 1 | 0 | ✅ |
+| `XamContentCreateEnumerator` | xam 0x25C | 1 | 0 | ✅ |
+| `XamContentCreateEx` | xam 0x259 | 1 | 0 | ✅ |
+| `XamContentDelete` | xam 0x25B | 1 | 0 | ✅ |
+| `XamContentFlush` | xam 0x267 | 1 | 0 | ⚪ stub |
+| `XamContentGetCreator` | xam 0x262 | 1 | 0 | ✅ |
+| `XamContentGetDeviceData` | xam 0x25E | 1 | 0 | ✅ |
+| `XamContentGetDeviceName` | xam 0x25F | 1 | 0 | ✅ |
+| `XamContentGetDeviceState` | xam 0x265 | 2 | 0 | ⚪ stub |
+| `XamContentGetLicenseMask` | xam 0x266 | 1 | 0 | ⚪ stub |
+| `XamContentGetThumbnail` | xam 0x261 | 1 | 0 | ✅ |
+| `XamContentInstall` | xam 0x26A | 1 | 0 | ❌ |
+| `XamContentLaunchImage` | xam 0x263 | 1 | 0 | ❌ |
+| `XamContentOpenFile` | xam 0x269 | 8 | 0 | 🟡 |
+| `XamContentResolve` | xam 0x268 | 2 | 0 | 🟡 |
+| `XamContentSetThumbnail` | xam 0x260 | 1 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Usuários, perfis e Live</b> (43)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XamParseGamerTileKey` | xam 0x30A | 1 | 0 | ✅ |
+| `XamProfileCreateEnumerator` | xam 0x231 | 1 | 0 | ✅ |
+| `XamProfileEnumerate` | xam 0x232 | 1 | 0 | ✅ |
+| `XamSessionCreateHandle` | xam 0x316 | 1 | 0 | ✅ |
+| `XamSessionRefObjByHandle` | xam 0x317 | 14 | 0 | ✅ |
+| `XamShowAchievementsUI` | xam 0x2C5 | 1 | 0 | ✅ |
+| `XamShowCustomMessageComposeUI` | xam 0x2E5 | 1 | 0 | ❌ |
+| `XamShowCustomPlayerListUI` | xam 0x2E6 | 1 | 0 | ❌ |
+| `XamShowDeviceSelectorUI` | xam 0x2CB | 1 | 0 | ✅ |
+| `XamShowDirtyDiscErrorUI` | xam 0x2D9 | 1 | 0 | ✅ |
+| `XamShowFriendRequestUI` | xam 0x2CE | 1 | 0 | ❌ |
+| `XamShowFriendsUI` | xam 0x2BF | 1 | 0 | ❌ |
+| `XamShowGameInviteUI` | xam 0x2CD | 1 | 0 | ❌ |
+| `XamShowGamerCardUIForXUID` | xam 0x2D5 | 1 | 0 | ❌ |
+| `XamShowGoldUpgradeUI` | xam 0x6A5 | 1 | 0 | ⚪ stub |
+| `XamShowKeyboardUI` | xam 0x2C1 | 1 | 0 | ✅ |
+| `XamShowMarketplaceDownloadItemsUI` | xam 0x2E7 | 1 | 0 | 🟡 |
+| `XamShowMarketplaceUI` | xam 0x2C7 | 2 | 0 | 🟡 |
+| `XamShowMessageBoxUI` | xam 0x2CA | 1 | 0 | ✅ |
+| `XamShowMessageBoxUIEx` | xam 0x2DC | 1 | 0 | ✅ |
+| `XamShowMessageComposeUI` | xam 0x2CC | 1 | 0 | ❌ |
+| `XamShowMessagesUI` | xam 0x2C0 | 1 | 0 | ❌ |
+| `XamShowPlayerReviewUI` | xam 0x2C6 | 1 | 0 | ❌ |
+| `XamShowPlayersUI` | xam 0x2C8 | 1 | 0 | ❌ |
+| `XamShowQuickChatUI` | xam 0x2C2 | 1 | 0 | ❌ |
+| `XamShowSigninUI` | xam 0x2BC | 1 | 0 | ✅ |
+| `XamShowSigninUIp` | xam 0x2BE | 1 | 0 | ✅ |
+| `XamShowWordRegisterUI` | xam 0x3C0 | 1 | 0 | ❌ |
+| `XamUserAreUsersFriends` | xam 0x213 | 2 | 0 | 🟡 |
+| `XamUserCheckPrivilege` | xam 0x212 | 4 | 0 | 🟡 |
+| `XamUserCreateAchievementEnumerator` | xam 0x2EE | 1 | 0 | 🟡 |
+| `XamUserCreateStatsEnumerator` | xam 0x2F7 | 3 | 0 | 🟡 |
+| `XamUserGetDeviceContext` | xam 0x208 | 2 | 0 | ⚪ stub |
+| `XamUserGetIndexFromXUID` | xam 0x211 | 1 | 0 | ✅ |
+| `XamUserGetMembershipTierFromXUID` | xam 0x217 | 2 | 0 | ✅ |
+| `XamUserGetName` | xam 0x20E | 1 | 0 | ✅ |
+| `XamUserGetOnlineCountryFromXUID` | xam 0x218 | 2 | 0 | ✅ |
+| `XamUserGetSigninInfo` | xam 0x227 | 1 | 0 | ✅ |
+| `XamUserGetSigninState` | xam 0x210 | 4 | 0 | ✅ |
+| `XamUserGetXUID` | xam 0x20A | 13 | 0 | ✅ |
+| `XamUserReadProfileSettings` | xam 0x219 | 4 | 0 | ✅ |
+| `XamUserWriteProfileSettings` | xam 0x21A | 1 | 0 | ✅ |
+| `XamWriteGamerTile` | xam 0x2F0 | 1 | 0 | 🟡 |
+
+</details>
+
+<details><summary><b>Vídeo e GPU</b> (31)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `VdCallGraphicsNotificationRoutines` | xboxkrnl 0x1B1 | 3 | 0 | 🟡 |
+| `VdEnableDisableClockGating` | xboxkrnl 0x1B4 | 1 | 0 | ⚪ stub |
+| `VdEnableRingBufferRPtrWriteBack` | xboxkrnl 0x1B6 | 1 | 0 | ✅ |
+| `VdGetCurrentDisplayGamma` | xboxkrnl 0x1B9 | 1 | 0 | ⚪ stub |
+| `VdGetCurrentDisplayInformation` | xboxkrnl 0x1BA | 3 | 0 | ⚪ stub |
+| `VdGetSystemCommandBuffer` | xboxkrnl 0x1BD | 1 | 0 | ⚪ stub |
+| `VdGlobalDevice` | xboxkrnl 0x1BE | 0 | 0 | ✅ |
+| `VdGlobalXamDevice` | xboxkrnl 0x1BF | 0 | 0 | ✅ |
+| `VdGpuClockInMHz` | xboxkrnl 0x1C0 | 0 | 0 | ✅ |
+| `VdHSIOCalibrationLock` | xboxkrnl 0x1C1 | 0 | 0 | ✅ |
+| `VdInitializeEngines` | xboxkrnl 0x1C2 | 1 | 0 | ⚪ stub |
+| `VdInitializeRingBuffer` | xboxkrnl 0x1C3 | 1 | 0 | ✅ |
+| `VdInitializeScalerCommandBuffer` | xboxkrnl 0x1C5 | 1 | 0 | 🟡 |
+| `VdIsHSIOTrainingSucceeded` | xboxkrnl 0x1C6 | 1 | 0 | ⚪ stub |
+| `VdPersistDisplay` | xboxkrnl 0x1C7 | 1 | 0 | 🟡 |
+| `VdQuerySystemCommandBuffer` | xboxkrnl 0x1C8 | 1 | 0 | ❌ |
+| `VdQueryVideoFlags` | xboxkrnl 0x1C9 | 1 | 0 | ⚪ stub |
+| `VdQueryVideoMode` | xboxkrnl 0x1CA | 4 | 0 | ⚪ stub |
+| `VdRetrainEDRAM` | xboxkrnl 0x269 | 2 | 0 | ⚪ stub |
+| `VdRetrainEDRAMWorker` | xboxkrnl 0x26A | 1 | 0 | ⚪ stub |
+| `VdSetDisplayMode` | xboxkrnl 0x1D3 | 1 | 0 | ⚪ stub |
+| `VdSetDisplayModeOverride` | xboxkrnl 0x1D4 | 2 | 0 | ⚪ stub |
+| `VdSetGraphicsInterruptCallback` | xboxkrnl 0x1D5 | 2 | 0 | ✅ |
+| `VdSetSystemCommandBuffer` | xboxkrnl 0x1D8 | 1 | 0 | ❌ |
+| `VdSetSystemCommandBufferGpuIdentifierAddress` | xboxkrnl 0x1D9 | 3 | 0 | ⚪ stub |
+| `VdShutdownEngines` | xboxkrnl 0x1DC | 2 | 0 | ⚪ stub |
+| `VdSwap` | xboxkrnl 0x25B | 1 | 0 | ✅ |
+| `XGetAVPack` | xam 0x3CB | 1 | 0 | ⚪ stub |
+| `XGetVideoCapabilities` | xam 0x49E | 1 | 0 | ⚪ stub |
+| `XGetVideoMode` | xam 0x3D1 | 3 | 0 | 🟡 |
+| `XamReadTileToTexture` | xam 0x2F5 | 3 | 0 | ⚪ stub |
+
+</details>
+
+<details><summary><b>Sistema e console</b> (25)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `ExGetXConfigSetting` | xboxkrnl 0x10 | 25 | 0 | ✅ |
+| `ExLoadedCommandLine` | xboxkrnl 0x1AE | 0 | 0 | ✅ |
+| `ExRegisterTitleTerminateNotification` | xboxkrnl 0x15 | 9 | 0 | ✅ |
+| `HalReturnToFirmware` | xboxkrnl 0x28 | 1 | 0 | ⚪ stub |
+| `XGetGameRegion` | xam 0x3CC | 3 | 0 | ⚪ stub |
+| `XGetLanguage` | xam 0x3CD | 3 | 0 | ✅ |
+| `XamGetActiveDashAppInfo` | xam 0x7E1 | 7 | 0 | ✅ |
+| `XamGetCurrentTitleId` | xam 0x1CF | 15 | 0 | ✅ |
+| `XamGetExecutionId` | xam 0x280 | 2 | 0 | ✅ |
+| `XamGetOverlappedResult` | xam 0x1FB | 1 | 0 | 🟡 |
+| `XamGetPrivateEnumStructureFromHandle` | xam 0x24F | 5 | 0 | ✅ |
+| `XamGetSystemVersion` | xam 0x282 | 7 | 0 | ✅ |
+| `XamIsUIActive` | xam 0x2EC | 1 | 0 | ✅ |
+| `XamLoaderLaunchTitle` | xam 0x1A4 | 1 | 0 | 🟡 |
+| `XamLoaderTerminateTitle` | xam 0x1A9 | 2 | 0 | 🟡 |
+| `XamXStudioRequest` | xam 0x686 | 20 | 0 | ✅ |
+| `XboxHardwareInfo` | xboxkrnl 0x156 | 0 | 0 | ✅ |
+| `XboxKrnlVersion` | xboxkrnl 0x158 | 0 | 0 | ✅ |
+| `XexCheckExecutablePrivilege` | xboxkrnl 0x194 | 6 | 0 | ✅ |
+| `XexExecutableModuleHandle` | xboxkrnl 0x193 | 0 | 0 | ✅ |
+| `XexGetModuleHandle` | xboxkrnl 0x195 | 7 | 0 | ✅ |
+| `XexGetModuleSection` | xboxkrnl 0x196 | 1 | 0 | ✅ |
+| `XexGetProcedureAddress` | xboxkrnl 0x197 | 12 | 0 | ✅ |
+| `XexLoadImage` | xboxkrnl 0x199 | 3 | 0 | ✅ |
+| `XexUnloadImage` | xboxkrnl 0x1A1 | 1 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Runtime (Rtl, strings, exceções, log)</b> (24)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `DbgBreakPoint` | xboxkrnl 0x1 | 1 | 0 | ⚪ stub |
+| `DbgPrint` | xboxkrnl 0x3 | 23 | 0 | ✅ |
+| `EtxProducerLog` | xboxkrnl 0x332 | 10 | 0 | ❌ |
+| `EtxProducerRegister` | xboxkrnl 0x334 | 2 | 0 | ❌ |
+| `EtxProducerUnregister` | xboxkrnl 0x335 | 2 | 0 | ❌ |
+| `RtlCaptureContext` | xboxkrnl 0x119 | 2 | 0 | ❌ |
+| `RtlCompareMemory` | xboxkrnl 0x11A | 2 | 0 | ✅ |
+| `RtlCompareMemoryUlong` | xboxkrnl 0x11B | 10 | 0 | ✅ |
+| `RtlFillMemoryUlong` | xboxkrnl 0x126 | 2 | 0 | ✅ |
+| `RtlImageXexHeaderField` | xboxkrnl 0x12B | 2 | 0 | ✅ |
+| `RtlInitAnsiString` | xboxkrnl 0x12C | 24 | 0 | ✅ |
+| `RtlInitUnicodeString` | xboxkrnl 0x12D | 1 | 0 | ✅ |
+| `RtlMultiByteToUnicodeN` | xboxkrnl 0x133 | 1 | 0 | 🟡 |
+| `RtlNtStatusToDosError` | xboxkrnl 0x135 | 23 | 0 | ❔ |
+| `RtlRaiseException` | xboxkrnl 0x136 | 5 | 0 | ⚪ stub |
+| `RtlUnicodeStringToAnsiString` | xboxkrnl 0x142 | 1 | 0 | ✅ |
+| `RtlUnicodeToMultiByteN` | xboxkrnl 0x143 | 2 | 0 | 🟡 |
+| `RtlUnwind` | xboxkrnl 0x147 | 3 | 0 | ❌ |
+| `XamReadString` | xam 0x2F6 | 1 | 0 | ✅ |
+| `__C_specific_handler` | xboxkrnl 0x1A5 | 0 | 0 | ❌ |
+| `_snprintf` | xboxkrnl 0x13A | 7 | 0 | ✅ |
+| `_vsnprintf` | xboxkrnl 0x14D | 9 | 0 | ✅ |
+| `sprintf` | xboxkrnl 0x13B | 11 | 0 | ✅ |
+| `vsprintf` | xboxkrnl 0x14E | 1 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Memória</b> (20)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `ExAllocatePool` | xboxkrnl 0x9 | 1 | 0 | ✅ |
+| `ExAllocatePoolTypeWithTag` | xboxkrnl 0xB | 1 | 0 | ✅ |
+| `ExAllocatePoolWithTag` | xboxkrnl 0xA | 3 | 0 | ✅ |
+| `ExFreePool` | xboxkrnl 0xF | 12 | 0 | ✅ |
+| `MmAllocatePhysicalMemoryEx` | xboxkrnl 0xBA | 4 | 0 | ✅ |
+| `MmFreePhysicalMemory` | xboxkrnl 0xBD | 6 | 0 | ✅ |
+| `MmGetPhysicalAddress` | xboxkrnl 0xBE | 18 | 0 | ✅ |
+| `MmLockAndMapSegmentArray` | xboxkrnl 0xC0 | 1 | 0 | 🟡 |
+| `MmQueryAddressProtect` | xboxkrnl 0xC4 | 6 | 0 | ✅ |
+| `MmQueryAllocationSize` | xboxkrnl 0xC5 | 1 | 0 | ✅ |
+| `MmQueryStatistics` | xboxkrnl 0xC6 | 1 | 0 | ✅ |
+| `MmSetAddressProtect` | xboxkrnl 0xC7 | 1 | 0 | ✅ |
+| `MmUnlockAndUnmapSegmentArray` | xboxkrnl 0xC9 | 1 | 0 | 🟡 |
+| `NtAllocateVirtualMemory` | xboxkrnl 0xCC | 14 | 0 | ✅ |
+| `NtFreeVirtualMemory` | xboxkrnl 0xDC | 11 | 0 | ✅ |
+| `NtProtectVirtualMemory` | xboxkrnl 0xE1 | 2 | 0 | ✅ |
+| `RtlFreeAnsiString` | xboxkrnl 0x127 | 1 | 0 | ✅ |
+| `XamAlloc` | xam 0x1EA | 23 | 0 | ✅ |
+| `XamAllocEx` | xam 0x1EB | 3 | 0 | ✅ |
+| `XamFree` | xam 0x1EC | 25 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Kinect: HUD, esqueleto e telas Nui</b> (16)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XamShowNuiAchievementsUI` | xam 0x46E | 1 | 0 | ✅ |
+| `XamShowNuiCommunitySessionsUI` | xam 0x46F | 1 | 0 | ✅ |
+| `XamShowNuiControllerRequiredUI` | xam 0x47B | 1 | 0 | ✅ |
+| `XamShowNuiDeviceSelectorUI` | xam 0x470 | 1 | 0 | 🟡 |
+| `XamShowNuiDirtyDiscErrorUI` | xam 0x471 | 1 | 0 | ⚪ stub |
+| `XamShowNuiFriendRequestUI` | xam 0x479 | 1 | 0 | ✅ |
+| `XamShowNuiFriendsUI` | xam 0x472 | 1 | 0 | ✅ |
+| `XamShowNuiGameInviteUI` | xam 0x473 | 1 | 0 | ✅ |
+| `XamShowNuiGamerCardUIForXUID` | xam 0x474 | 1 | 0 | 🟡 |
+| `XamShowNuiGuideUI` | xam 0x356 | 1 | 0 | ✅ |
+| `XamShowNuiHardwareRequiredUI` | xam 0x47D | 1 | 0 | ✅ |
+| `XamShowNuiMarketplaceUI` | xam 0x476 | 1 | 0 | 🟡 |
+| `XamShowNuiMessageBoxUI` | xam 0x477 | 1 | 0 | 🟡 |
+| `XamShowNuiPartyUI` | xam 0x478 | 1 | 0 | ✅ |
+| `XamShowNuiSigninUI` | xam 0x47A | 1 | 0 | 🟡 |
+| `XamShowNuiTroubleshooterUI` | xam 0x46B | 1 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Avatares</b> (13)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XamAvatarGenerateMipMaps` | xam 0x5E2 | 2 | 0 | ⚪ stub |
+| `XamAvatarGetAssets` | xam 0x5E1 | 2 | 0 | 🟡 |
+| `XamAvatarGetAssetsResultSize` | xam 0x5E0 | 1 | 0 | ✅ |
+| `XamAvatarGetManifestLocalUser` | xam 0x5DE | 1 | 0 | 🟡 |
+| `XamAvatarGetManifestsByXuid` | xam 0x5DF | 1 | 0 | ⚪ stub |
+| `XamAvatarGetMetadataRandom` | xam 0x5EB | 1 | 0 | ✅ |
+| `XamAvatarGetMetadataSignedOutProfile` | xam 0x5EF | 1 | 0 | ⚪ stub |
+| `XamAvatarGetMetadataSignedOutProfileCount` | xam 0x5EE | 1 | 0 | ⚪ stub |
+| `XamAvatarInitialize` | xam 0x5DC | 1 | 0 | ✅ |
+| `XamAvatarLoadAnimation` | xam 0x5E7 | 1 | 0 | 🟡 |
+| `XamAvatarManifestGetBodyType` | xam 0x5F1 | 4 | 0 | ✅ |
+| `XamAvatarSetCustomAsset` | xam 0x5E3 | 1 | 0 | 🟡 |
+| `XamAvatarShutdown` | xam 0x5DD | 1 | 0 | 🟡 |
+
+</details>
+
+<details><summary><b>Áudio</b> (12)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XAudioEnableDucker` | xboxkrnl 0x34D | 1 | 0 | ⚪ stub |
+| `XAudioGetDuckerAttackTime` | xboxkrnl 0x353 | 1 | 0 | ❌ |
+| `XAudioGetDuckerHoldTime` | xboxkrnl 0x357 | 1 | 0 | ❌ |
+| `XAudioGetDuckerLevel` | xboxkrnl 0x350 | 2 | 0 | ❌ |
+| `XAudioGetDuckerReleaseTime` | xboxkrnl 0x355 | 1 | 0 | ❌ |
+| `XAudioGetDuckerThreshold` | xboxkrnl 0x351 | 4 | 0 | ❌ |
+| `XAudioGetSpeakerConfig` | xboxkrnl 0x1FF | 2 | 0 | ✅ |
+| `XAudioRegisterRenderDriverClient` | xboxkrnl 0x1F3 | 1 | 0 | ✅ |
+| `XAudioSubmitRenderDriverFrame` | xboxkrnl 0x1F5 | 1 | 0 | ✅ |
+| `XAudioUnregisterRenderDriverClient` | xboxkrnl 0x1F4 | 1 | 0 | ✅ |
+| `XMACreateContext` | xboxkrnl 0x224 | 2 | 0 | ✅ |
+| `XMAReleaseContext` | xboxkrnl 0x226 | 2 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Kinect: câmera e sensor</b> (11)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `PsCamDeviceRequest` | xboxkrnl 0x30D | 1 | 0 | ✅ |
+| `XamNuiCameraElevationGetAngle` | xam 0x881 | 2 | 0 | ✅ |
+| `XamNuiCameraElevationSetAngle` | xam 0x880 | 2 | 0 | ✅ |
+| `XamNuiCameraElevationStopMovement` | xam 0x883 | 3 | 0 | ✅ |
+| `XamNuiCameraRememberFloor` | xam 0x865 | 2 | 0 | ✅ |
+| `XamNuiCameraTiltGetStatus` | xam 0x870 | 1 | 0 | ✅ |
+| `XamNuiCameraTiltReportStatus` | xam 0x895 | 7 | 0 | ✅ |
+| `XamNuiCameraTiltSetCallback` | xam 0x86D | 1 | 0 | ✅ |
+| `XamNuiGetDeviceStatus` | xam 0x885 | 1 | 0 | ✅ |
+| `XamUserNuiGetEnrollmentIndex` | xam 0x86A | 1 | 0 | ✅ |
+| `XamUserNuiGetUserIndex` | xam 0x869 | 3 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Câmera Xbox Live Vision</b> (11)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XUsbcamCreate` | xboxkrnl 0x222 | 1 | 0 | ⚪ stub |
+| `XUsbcamDestroy` | xboxkrnl 0x223 | 1 | 0 | ❌ |
+| `XUsbcamGetConfig` | xboxkrnl 0x21B | 2 | 0 | ❌ |
+| `XUsbcamGetState` | xboxkrnl 0x21D | 1 | 0 | ⚪ stub |
+| `XUsbcamGetView` | xboxkrnl 0x221 | 1 | 0 | ❌ |
+| `XUsbcamReadFrame` | xboxkrnl 0x21E | 1 | 0 | ❌ |
+| `XUsbcamReset` | xboxkrnl 0x264 | 1 | 0 | ❌ |
+| `XUsbcamSetCaptureMode` | xboxkrnl 0x21A | 1 | 0 | ❌ |
+| `XUsbcamSetConfig` | xboxkrnl 0x21C | 3 | 0 | ❌ |
+| `XUsbcamSetView` | xboxkrnl 0x220 | 1 | 0 | ❌ |
+| `XUsbcamSnapshot` | xboxkrnl 0x21F | 1 | 0 | ❌ |
+
+</details>
+
+<details><summary><b>Voz e microfones</b> (10)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `MicDeviceRequest` | xboxkrnl 0x2B1 | 4 | 0 | ⚪ stub |
+| `RmcDeviceRequest` | xboxkrnl 0x2E1 | 5 | 0 | ❌ |
+| `XAudioGetVoiceCategoryVolume` | xboxkrnl 0x1F8 | 1 | 0 | ⚪ stub |
+| `XamShowGameVoiceChannelUI` | xam 0x3C5 | 2 | 0 | ❌ |
+| `XamShowVoiceMailUI` | xam 0x2C3 | 1 | 0 | ❌ |
+| `XamVoiceClose` | xam 0x30F | 3 | 0 | ⚪ stub |
+| `XamVoiceCreate` | xam 0x30C | 1 | 0 | ⚪ stub |
+| `XamVoiceHeadsetPresent` | xam 0x30D | 1 | 0 | ⚪ stub |
+| `XamVoiceIsActiveProcess` | xam 0x497 | 3 | 0 | ⚪ stub |
+| `XamVoiceSubmitPacket` | xam 0x30E | 2 | 0 | ⚪ stub |
+
+</details>
+
+<details><summary><b>Mensagens XMsg (apps do sistema)</b> (6)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XMsgCancelIORequest` | xam 0x1F8 | 5 | 0 | ✅ |
+| `XMsgCompleteIORequest` | xam 0x1F5 | 1 | 0 | 🟡 |
+| `XMsgInProcessCall` | xam 0x1F4 | 31 | 0 | ✅ |
+| `XMsgStartIORequest` | xam 0x1F7 | 53 | 0 | ✅ |
+| `XMsgStartIORequestEx` | xam 0x1FC | 3 | 0 | ✅ |
+| `XMsgSystemProcessCall` | xam 0x1F6 | 5 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Tarefas, enumeração e notificações</b> (5)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XNotifyGetNext` | xam 0x28B | 13 | 0 | ✅ |
+| `XamCreateEnumeratorHandle` | xam 0x24E | 4 | 0 | ✅ |
+| `XamEnumerate` | xam 0x250 | 3 | 0 | ✅ |
+| `XamNotifyCreateListener` | xam 0x28A | 2 | 0 | ✅ |
+| `XamTaskSchedule` | xam 0x1AF | 1 | 0 | 🟡 |
+
+</details>
+
+<details><summary><b>Criptografia e chaves do console</b> (5)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XeCryptRandom` | xboxkrnl 0x18A | 7 | 0 | ⚪ stub |
+| `XeCryptSha256Final` | xboxkrnl 0x312 | 1 | 0 | ✅ |
+| `XeCryptSha256Init` | xboxkrnl 0x310 | 1 | 0 | ✅ |
+| `XeCryptSha256Update` | xboxkrnl 0x311 | 1 | 0 | ✅ |
+| `XeKeysGetConsoleID` | xboxkrnl 0x246 | 1 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Kinect ID e biometria</b> (4)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XamNuiIdentityGetSessionId` | xam 0x873 | 6 | 0 | ✅ |
+| `XamReadBiometricData` | xam 0x849 | 3 | 0 | ✅ |
+| `XamUserNuiEnableBiometric` | xam 0x863 | 1 | 0 | ✅ |
+| `XamWriteBiometricData` | xam 0x84A | 1 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Entrada (controle, teclado)</b> (4)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `XamInputGetCapabilities` | xam 0x190 | 2 | 0 | 🟡 |
+| `XamInputGetKeystrokeEx` | xam 0x198 | 2 | 0 | ✅ |
+| `XamInputGetState` | xam 0x191 | 2 | 0 | ✅ |
+| `XamInputSetState` | xam 0x192 | 2 | 0 | ✅ |
+
+</details>
+
+<details><summary><b>Descompressão (LDI/LZX)</b> (4)</summary>
+
+| Importação | Biblioteca, ordinal | Chamadas | Em execução | Xenia |
+|---|---|---|---|---|
+| `LDICreateDecompression` | xboxkrnl 0xB6 | 3 | 0 | ✅ |
+| `LDIDecompress` | xboxkrnl 0xB7 | 4 | 0 | ✅ |
+| `LDIDestroyDecompression` | xboxkrnl 0xB8 | 4 | 0 | ✅ |
+| `LDIResetDecompression` | xboxkrnl 0x2E2 | 1 | 0 | ✅ |
+
+</details>
+
+**Ausentes no Xenia (82):** `EtxProducerLog`, `EtxProducerRegister`, `EtxProducerUnregister`, `NetDll_WSACancelOverlappedIO`, `NetDll_WSARecv`, `NetDll_WSASend`, `NetDll_XNetDnsReverseLookup`, `NetDll_XNetDnsReverseRelease`, `NetDll_XNetGetXnAddrPlatform`, `NetDll_XNetInAddrToServer`, `NetDll_XNetQosGetListenStats`, `NetDll_XNetReplaceKey`, `NetDll_XNetServerToInAddr`, `NetDll_XNetSetOpt`, `NetDll_XNetTsAddrToInAddr`, `NetDll_XnpCapture`, `NetDll_XnpConfig`, `NetDll_XnpConfigUPnP`, `NetDll_XnpEthernetInterceptRecv`, `NetDll_XnpEthernetInterceptSetCallbacks`, `NetDll_XnpEthernetInterceptXmit`, `NetDll_XnpGetActiveSocketList`, `NetDll_XnpGetConfigStatus`, `NetDll_XnpGetVlanXboxName`, `NetDll_XnpLoadConfigParams`, `NetDll_XnpLoadMachineAccount`, `NetDll_XnpLogonClearQEvent`, `NetDll_XnpLogonGetQFlags`, `NetDll_XnpLogonGetQVals`, `NetDll_XnpLogonGetStatus`, `NetDll_XnpLogonSetPState`, `NetDll_XnpLogonSetQEvent`, `NetDll_XnpLogonSetQFlags`, `NetDll_XnpLogonSetQVals`, `NetDll_XnpNoteSystemTime`, `NetDll_XnpRegisterKeyForCallerType`, `NetDll_XnpSaveConfigParams`, `NetDll_XnpSaveMachineAccount`, `NetDll_XnpSetVlanXboxName`, `NetDll_XnpUnregisterKeyForCallerType`, `NtWriteFileGather`, `RmcDeviceRequest`, `RtlCaptureContext`, `RtlUnwind`, `VdQuerySystemCommandBuffer`, `VdSetSystemCommandBuffer`, `XAudioGetDuckerAttackTime`, `XAudioGetDuckerHoldTime`, `XAudioGetDuckerLevel`, `XAudioGetDuckerReleaseTime`, `XAudioGetDuckerThreshold`, `XUsbcamDestroy`, `XUsbcamGetConfig`, `XUsbcamGetView`, `XUsbcamReadFrame`, `XUsbcamReset`, `XUsbcamSetCaptureMode`, `XUsbcamSetConfig`, `XUsbcamSetView`, `XUsbcamSnapshot`, `XamContentInstall`, `XamContentLaunchImage`, `XamShowCustomMessageComposeUI`, `XamShowCustomPlayerListUI`, `XamShowFriendRequestUI`, `XamShowFriendsUI`, `XamShowGameInviteUI`, `XamShowGameVoiceChannelUI`, `XamShowGamerCardUIForXUID`, `XamShowMessageComposeUI`, `XamShowMessagesUI`, `XamShowPlayerReviewUI`, `XamShowPlayersUI`, `XamShowQuickChatUI`, `XamShowVoiceMailUI`, `XamShowWordRegisterUI`, `XamXlfsInitializeUploadQueue`, `XamXlfsMountUploadQueueInstance`, `XamXlfsUninitializeUploadQueue`, `XamXlfsUnmountUploadQueueInstance`, `XexUnloadImageAndExitThread`, `__C_specific_handler`.
+
+## Pendências
+
+- Importações do Kinect ausentes ou stub: `XAudioGetVoiceCategoryVolume`, `XUsbcamCreate`, `XUsbcamDestroy`, `XUsbcamGetConfig`, `XUsbcamGetState`, `XUsbcamGetView`, `XUsbcamReadFrame`, `XUsbcamReset`, `XUsbcamSetCaptureMode`, `XUsbcamSetConfig`, `XUsbcamSetView`, `XUsbcamSnapshot`, `XamAvatarGenerateMipMaps`, `XamAvatarGetManifestsByXuid`, `XamAvatarGetMetadataSignedOutProfile`, `XamAvatarGetMetadataSignedOutProfileCount`, `XamShowGameVoiceChannelUI`, `XamShowNuiDirtyDiscErrorUI`, `XamShowVoiceMailUI`, `XamVoiceClose`, `XamVoiceCreate`, `XamVoiceHeadsetPresent`, `XamVoiceIsActiveProcess`, `XamVoiceSubmitPacket`.
+
+## Arquivos da análise
+
+- Dados: `~/Kixenia/kinect-sdk-re/games/decompilado/crasice/` (`crasice.img`, `crasice_imports.json`, `crasice_kinect.json`, `crasice_fngraph.json`, `c_full/<endereço>.c`: 282 funções).
+- Projeto Ghidra: `games/decompilado/crasice/ghidra/crasice` (PowerPC:BE:64:VMX128-32addr, sem análise automática).
