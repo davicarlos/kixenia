@@ -114,6 +114,24 @@ class NUIController {
   // The user bound to an enrollment, or kUserCount.
   uint32_t FindEnrolledUser(uint32_t enrollment_index) const;
 
+  // Kinect ID's eight enrollment slots: the title's identity runtime keeps
+  // the faces, and the system which profile each slot is. Kept in the
+  // storage root from run to run, as the console keeps them.
+  static constexpr uint32_t kEnrollmentSlots = 8;
+  uint64_t GetEnrollmentXuid(uint32_t slot);
+  // Binds the slot to the profile, taking it from any slot it had before.
+  void BindEnrollment(uint32_t slot, uint64_t xuid);
+  // The slot the system last told the title a tracked player is (0x2C00D).
+  void SetAnsweredSlot(uint32_t tracking_id, uint32_t slot);
+  uint32_t GetAnsweredSlot(uint32_t tracking_id) const;
+  // The player the title last asked about, or 0.
+  uint32_t GetLastAnsweredPlayer() const;
+  // The enrollment the system asked the title for (0x2C006) and the user it
+  // is for, until the title answers (0x2C003).
+  void SetPendingEnrollment(uint32_t tracking_id, uint32_t user_index);
+  bool TakePendingEnrollment(uint32_t tracking_id, uint32_t& user_index);
+  bool HasPendingEnrollment() const;
+
   // The Kinect ID data titles hand xam for a profile (0x2A007) and read back
   // (0x2A008): {version, data}. kBiometricNone is a profile without any.
   static constexpr uint32_t kBiometricNone = 0x80000000;
@@ -189,6 +207,22 @@ class NUIController {
   std::atomic<uint32_t> identity_engine_ = 0;
 
   std::array<std::atomic<uint32_t>, kUserCount> user_enrollments_;
+
+  void LoadEnrollments() const;
+  void SaveEnrollments() const;
+  uint64_t UserXuid(uint32_t user_index) const;
+  mutable std::mutex enrollment_mutex_;
+  mutable bool enrollments_loaded_ = false;
+  mutable std::array<uint64_t, kEnrollmentSlots> enrollment_xuids_ = {};
+  struct AnsweredSlot {
+    uint32_t tracking_id = 0;
+    uint32_t slot = 0;
+  };
+  std::array<AnsweredSlot, 8> answered_slots_ = {};
+  uint32_t next_answered_slot_ = 0;
+  uint32_t last_answered_player_ = 0;
+  uint32_t pending_tracking_id_ = 0;
+  uint32_t pending_user_index_ = kUserCount;
 
   std::mutex biometric_mutex_;
   std::unordered_map<uint64_t, BiometricData> biometric_cache_;

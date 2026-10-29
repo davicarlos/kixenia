@@ -22,6 +22,7 @@
 #include "xenia/kernel/title_id_utils.h"
 #include "xenia/kernel/util/shim_utils.h"
 #include "xenia/kernel/xam/content_manager.h"
+#include "xenia/kernel/xam/xam_nui.h"
 #include "xenia/kernel/xam/xam_content_device.h"
 #include "xenia/kernel/xam/xam_private.h"
 #include "xenia/ui/file_picker.h"
@@ -1168,9 +1169,42 @@ dword_result_t XamShowNuiSigninUI_entry(dword_t tracking_id, dword_t user_index,
       }
       XELOGI("NUI: Kinect sign-in for player {:08X} kept profile slot {}",
              uint32_t(tracking_id), slot);
+      // As the console does, the player's face is enrolled for the profile
+      // if Kinect ID doesn't know it yet.
+      // Titles may sign in without naming the player (4D530A1A from a
+      // menu): then it's the engaged one, the first tracked one, or the one
+      // the title last asked Kinect ID about.
+      NUIController* nui = kernel_state()->nui();
+      uint32_t player = tracking_id;
+      if (!player) {
+        player = nui->GetEngagedTrackingId();
+      }
+      if (!player) {
+        player = xeXamNuiHudFirstTrackedId();
+      }
+      if (!player) {
+        player = nui->GetLastAnsweredPlayer();
+      }
+      if (player != uint32_t(tracking_id)) {
+        XELOGI("NUI: the Kinect sign-in is for player {:08X}", player);
+      }
+      xeXamNuiRequestEnrollment(player, slot);
       kernel_state()->BroadcastNotification(kXNotificationSystemUI, true);
+      // The screen stays up while the title enrolls the player's face: when
+      // it closes, the title looks for the player being the profile, and
+      // calls the sign-in a failure if the enrollment isn't done.
       std::thread([]() {
+        constexpr auto kEnrollmentTimeout = std::chrono::seconds(10);
+        const auto deadline =
+            std::chrono::steady_clock::now() + kEnrollmentTimeout;
         xe::threading::Sleep(kUIDelayMillis);
+        while (kernel_state()->nui()->HasPendingEnrollment() &&
+               std::chrono::steady_clock::now() < deadline) {
+          xe::threading::Sleep(std::chrono::milliseconds(50));
+        }
+        if (kernel_state()->nui()->HasPendingEnrollment()) {
+          XELOGW("NUI: the title didn't finish the Kinect ID enrollment");
+        }
         kernel_state()->BroadcastNotification(kXNotificationSystemUI, false);
       }).detach();
       return X_ERROR_SUCCESS;

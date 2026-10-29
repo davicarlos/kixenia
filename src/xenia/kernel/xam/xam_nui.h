@@ -58,6 +58,13 @@ X_HRESULT xeXamNuiHudInterpretFrame(uint8_t* frame);
 // The enrollment index the skeleton with the tracking ID had in the last
 // frame the HUD saw, or 0xFFFFFFFE.
 uint32_t xeXamNuiHudEnrollmentOf(uint32_t tracking_id);
+// The first fully tracked player in the last skeleton frame, or 0.
+uint32_t xeXamNuiHudFirstTrackedId();
+// Asks the title's identity engine to enroll the tracked player's face for
+// the user, unless the user's profile is enrolled already.
+void xeXamNuiRequestEnrollment(uint32_t tracking_id, uint32_t user_index);
+// Whether the profile has Kinect ID data a title saved (its enrolled face).
+bool xeXamHasBiometricData(uint64_t xuid);
 
 // XamApp's NUI messages (0x2A0xx, 0x2B0xx, 0x2C0xx). False for a message that
 // isn't one of them.

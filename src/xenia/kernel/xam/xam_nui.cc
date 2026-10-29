@@ -569,6 +569,19 @@ std::filesystem::path BiometricDataPath(uint64_t xuid) {
          "NuiBiometric.bin";
 }
 
+// Whether the profile has Kinect ID data a title saved (its enrolled face).
+bool xeXamHasBiometricData(uint64_t xuid) {
+  // Titles cache "none" (kBiometricNone) for a profile without a face.
+  const NUIController::BiometricData cached =
+      kernel_state()->nui()->GetCachedBiometricData(xuid);
+  if (cached.version != NUIController::kBiometricNone &&
+      !cached.data.empty()) {
+    return true;
+  }
+  std::error_code error;
+  return std::filesystem::exists(BiometricDataPath(xuid), error);
+}
+
 X_RESULT xeXamWriteBiometricData(uint64_t xuid, uint32_t version,
                                  const uint8_t* data, uint32_t size) {
   const auto path = BiometricDataPath(xuid);

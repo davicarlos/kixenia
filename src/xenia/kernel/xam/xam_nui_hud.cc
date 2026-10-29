@@ -770,6 +770,21 @@ uint32_t xeXamNuiHudEnrollmentOf(uint32_t tracking_id) {
   return 0xFFFFFFFE;
 }
 
+// The first fully tracked player in the HUD's copy of the last frame, or 0.
+uint32_t xeXamNuiHudFirstTrackedId() {
+  HudState& hud = GetHud();
+  std::lock_guard<std::mutex> lock(hud.mutex);
+  if (hud.has_frame) {
+    for (uint32_t i = 0; i < kNuiSkeletonCount; ++i) {
+      Skeleton skeleton = GetSkeleton(hud.frame.data(), i);
+      if (skeleton.state() == kNuiStateTracked && skeleton.tracking_id()) {
+        return skeleton.tracking_id();
+      }
+    }
+  }
+  return 0;
+}
+
 // The engaged player's enrollment in the HUD's copy of the last frame, or -2
 // (0x816ACCE8).
 dword_result_t XamNuiHudGetEngagedEnrollmentIndex_entry() {

@@ -21,6 +21,9 @@
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/kinect/kinect_audio.h"
 #include "xenia/kernel/kinect/kinect_device.h"
+#include "xenia/kernel/xam/user_profile.h"
+#include "xenia/kernel/xam/xam_nui.h"
+#include "xenia/kernel/xam/xam_state.h"
 #include "xenia/xbox.h"
 
 namespace xe {
@@ -104,8 +107,26 @@ uint32_t NUIController::NuiHudCheck(uint32_t tracking_id) {
 }
 
 uint32_t NUIController::GetUserEnrollment(uint32_t user_index) const {
-  return user_index < kUserCount ? user_enrollments_[user_index].load()
-                                 : kNoEnrollment;
+  if (user_index >= kUserCount) {
+    return kNoEnrollment;
+  }
+  if (user_enrollments_[user_index] != kNoEnrollment) {
+    return user_enrollments_[user_index];
+  }
+  // A profile Kinect ID knows from an earlier run: bound to a slot, and with
+  // the face a title saved. A slot bound to a profile whose face was never
+  // saved would make whoever the title puts in it that profile.
+  const uint64_t xuid = UserXuid(user_index);
+  if (xuid && xam::xeXamHasBiometricData(xuid)) {
+    std::lock_guard<std::mutex> lock(enrollment_mutex_);
+    LoadEnrollments();
+    for (uint32_t slot = 0; slot < kEnrollmentSlots; ++slot) {
+      if (enrollment_xuids_[slot] == xuid) {
+        return slot;
+      }
+    }
+  }
+  return kNoEnrollment;
 }
 
 void NUIController::SetUserEnrollment(uint32_t user_index,
@@ -126,7 +147,141 @@ uint32_t NUIController::FindEnrolledUser(uint32_t enrollment_index) const {
       return i;
     }
   }
+  if (enrollment_index < kEnrollmentSlots) {
+    uint64_t xuid;
+    {
+      std::lock_guard<std::mutex> lock(enrollment_mutex_);
+      LoadEnrollments();
+      xuid = enrollment_xuids_[enrollment_index];
+    }
+    for (uint32_t i = 0;
+         xuid && xam::xeXamHasBiometricData(xuid) && i < kUserCount; ++i) {
+      if (UserXuid(i) == xuid) {
+        return i;
+      }
+    }
+  }
   return kUserCount;
+}
+
+uint64_t NUIController::UserXuid(uint32_t user_index) const {
+  auto* xam_state = KernelState::shared()->xam_state();
+  const auto* profile = xam_state ? xam_state->GetUserProfile(user_index)
+                                  : nullptr;
+  return profile ? profile->xuid() : 0;
+}
+
+namespace {
+std::filesystem::path EnrollmentsPath() {
+  return KernelState::shared()->emulator()->storage_root() / "nui" /
+         "kinect_id_enrollments.bin";
+}
+}  // namespace
+
+// Eight big-endian XUIDs, 0 for a free slot.
+void NUIController::LoadEnrollments() const {
+  if (enrollments_loaded_) {
+    return;
+  }
+  enrollments_loaded_ = true;
+  if (FILE* file = xe::filesystem::OpenFile(EnrollmentsPath(), "rb")) {
+    uint8_t data[kEnrollmentSlots * 8];
+    if (std::fread(data, 1, sizeof(data), file) == sizeof(data)) {
+      for (uint32_t slot = 0; slot < kEnrollmentSlots; ++slot) {
+        enrollment_xuids_[slot] = xe::load_and_swap<uint64_t>(data + slot * 8);
+      }
+    }
+    std::fclose(file);
+  }
+}
+
+void NUIController::SaveEnrollments() const {
+  std::error_code error;
+  std::filesystem::create_directories(EnrollmentsPath().parent_path(), error);
+  if (FILE* file = xe::filesystem::OpenFile(EnrollmentsPath(), "wb")) {
+    uint8_t data[kEnrollmentSlots * 8];
+    for (uint32_t slot = 0; slot < kEnrollmentSlots; ++slot) {
+      xe::store_and_swap<uint64_t>(data + slot * 8, enrollment_xuids_[slot]);
+    }
+    std::fwrite(data, 1, sizeof(data), file);
+    std::fclose(file);
+  }
+}
+
+uint64_t NUIController::GetEnrollmentXuid(uint32_t slot) {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  LoadEnrollments();
+  return slot < kEnrollmentSlots ? enrollment_xuids_[slot] : 0;
+}
+
+void NUIController::BindEnrollment(uint32_t slot, uint64_t xuid) {
+  if (slot >= kEnrollmentSlots || !xuid) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  LoadEnrollments();
+  for (uint64_t& bound : enrollment_xuids_) {
+    if (bound == xuid) {
+      bound = 0;
+    }
+  }
+  enrollment_xuids_[slot] = xuid;
+  SaveEnrollments();
+  XELOGI("Kinect ID: slot {} is now profile {:016X}", slot, xuid);
+}
+
+void NUIController::SetAnsweredSlot(uint32_t tracking_id, uint32_t slot) {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  last_answered_player_ = tracking_id;
+  for (AnsweredSlot& answered : answered_slots_) {
+    if (answered.tracking_id == tracking_id) {
+      answered.slot = slot;
+      return;
+    }
+  }
+  answered_slots_[next_answered_slot_] = {tracking_id, slot};
+  next_answered_slot_ = (next_answered_slot_ + 1) % answered_slots_.size();
+}
+
+uint32_t NUIController::GetLastAnsweredPlayer() const {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  return last_answered_player_;
+}
+
+uint32_t NUIController::GetAnsweredSlot(uint32_t tracking_id) const {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  for (const AnsweredSlot& answered : answered_slots_) {
+    if (tracking_id && answered.tracking_id == tracking_id) {
+      return answered.slot;
+    }
+  }
+  return kNoEnrollment;
+}
+
+void NUIController::SetPendingEnrollment(uint32_t tracking_id,
+                                         uint32_t user_index) {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  pending_tracking_id_ = tracking_id;
+  pending_user_index_ = user_index;
+}
+
+bool NUIController::HasPendingEnrollment() const {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  return pending_user_index_ < kUserCount;
+}
+
+bool NUIController::TakePendingEnrollment(uint32_t tracking_id,
+                                          uint32_t& user_index) {
+  std::lock_guard<std::mutex> lock(enrollment_mutex_);
+  if (pending_user_index_ >= kUserCount ||
+      (tracking_id && pending_tracking_id_ &&
+       tracking_id != pending_tracking_id_)) {
+    return false;
+  }
+  user_index = pending_user_index_;
+  pending_user_index_ = kUserCount;
+  pending_tracking_id_ = 0;
+  return true;
 }
 
 NUIController::BiometricData NUIController::GetCachedBiometricData(

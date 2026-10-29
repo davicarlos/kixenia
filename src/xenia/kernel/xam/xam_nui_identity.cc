@@ -19,6 +19,8 @@
 
 #include <chrono>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 #include "xenia/base/cvar.h"
 #include "xenia/base/logging.h"
@@ -26,6 +28,8 @@
 #include "xenia/kernel/kernel_state.h"
 #include "xenia/kernel/nui.h"
 #include "xenia/kernel/util/shim_utils.h"
+#include "xenia/kernel/xam/user_profile.h"
+#include "xenia/kernel/xam/xam_state.h"
 #include "xenia/kernel/xam/xam_nui.h"
 #include "xenia/kernel/xam/xam_private.h"
 #include "xenia/kernel/xthread.h"
@@ -63,7 +67,71 @@ X_HRESULT CallIdentityEngine(uint32_t message, uint32_t* words,
   return xeXamNuiCallTitle(engine, message, words, word_count);
 }
 
+// Messages to the title's identity engine on a thread of its own: the system
+// asks from wherever it is (a sign-in screen closing), and the title may hold
+// its identity runtime's lock there.
+std::mutex identity_thread_mutex;
+object_ref<XHostThread> identity_thread;
+
+void CallIdentityEngineLater(uint32_t message, std::vector<uint32_t> words,
+                             uint32_t tracking_id) {
+  KernelState* state = kernel_state();
+  auto thread = object_ref<XHostThread>(new XHostThread(
+      state, 64 * 1024, 0,
+      [message, words, tracking_id]() mutable {
+        const X_HRESULT result = CallIdentityEngine(
+            message, words.empty() ? nullptr : words.data(),
+            uint32_t(words.size()));
+        XELOGI("Kinect ID: the title took {:05X}: {:08X}", message,
+               uint32_t(result));
+        // Refused (the player out of view, say): no answer will come.
+        if (message == 0x2C006 && int32_t(result) < 0) {
+          uint32_t user_index;
+          kernel_state()->nui()->TakePendingEnrollment(tracking_id,
+                                                       user_index);
+        }
+        return 0;
+      },
+      state->GetSystemProcess()));
+  thread->set_name("Kinect ID");
+  thread->Create();
+  std::lock_guard<std::mutex> lock(identity_thread_mutex);
+  identity_thread = thread;
+}
+
 }  // namespace
+
+// Signing a player in with the Kinect asks the title to enroll their face
+// for the profile (0x2C006 {tracking ID, user, 1}); the title collects face
+// samples and answers with the slot it enrolled them in (0x2C003). Skipped
+// for a profile already enrolled, or without a title's identity engine.
+void xeXamNuiRequestEnrollment(uint32_t tracking_id, uint32_t user_index) {
+  NUIController* nui = kernel_state()->nui();
+  if (!nui->identity_engine() || !tracking_id ||
+      user_index >= NUIController::kUserCount) {
+    return;
+  }
+  auto* profile = kernel_state()->xam_state()->GetUserProfile(user_index);
+  if (!profile) {
+    return;
+  }
+  // Enrolled only once a title saved the face: a sign-in that failed after
+  // the enrollment leaves the slot bound but nothing saved.
+  if (nui->GetUserEnrollment(user_index) != NUIController::kNoEnrollment &&
+      xeXamHasBiometricData(profile->xuid())) {
+    return;
+  }
+  nui->SetPendingEnrollment(tracking_id, user_index);
+  // The title checks the slot the system gave this player when it asked who
+  // they are before it enrolls them there, so that slot is theirs from now.
+  const uint32_t slot = nui->GetAnsweredSlot(tracking_id);
+  if (slot < NUIController::kEnrollmentSlots) {
+    nui->BindEnrollment(slot, profile->xuid());
+  }
+  XELOGI("Kinect ID: asking the title to enroll player {:08X} for user {}",
+         tracking_id, user_index);
+  CallIdentityEngineLater(0x2C006, {tracking_id, user_index, 1}, tracking_id);
+}
 
 // --- Exports -----------------------------------------------------------------
 
@@ -506,12 +574,41 @@ bool xeXamNuiDispatchMessage(uint32_t message, uint32_t buffer_ptr,
       result = X_E_SUCCESS;
       return true;
     case 0x2C001:
-    case 0x2C003:
-    case 0x2C004:
     case 0x2C005:
       // Identity service setup from 4D5308C9's runtime.
       result = X_E_SUCCESS;
       return true;
+    case 0x2C003:
+    case 0x2C004: {
+      // The title's answer to what the system asked: 0x2C003 an enrollment,
+      // 0x2C004 an identification. {result, tracking ID, slot, ...}.
+      if (!buffer) {
+        result = X_E_SUCCESS;
+        return true;
+      }
+      const uint32_t answer = xe::load_and_swap<uint32_t>(buffer);
+      const uint32_t tracking_id = xe::load_and_swap<uint32_t>(buffer + 4);
+      const uint32_t slot = xe::load_and_swap<uint32_t>(buffer + 8);
+      XELOGI("Kinect ID: {} of player {:08X}: {:08X}, slot {}",
+             message == 0x2C003 ? "enrollment" : "identification",
+             tracking_id, answer, slot);
+      uint32_t user_index;
+      if (message == 0x2C003 && nui->TakePendingEnrollment(tracking_id,
+                                                          user_index) &&
+          int32_t(answer) >= 0 && slot < NUIController::kEnrollmentSlots) {
+        if (auto* profile =
+                kernel_state()->xam_state()->GetUserProfile(user_index)) {
+          nui->BindEnrollment(slot, profile->xuid());
+          nui->SetUserEnrollment(user_index, slot);
+          kernel_state()->BroadcastNotification(
+              kXNotificationSystemNUIBindingChanged, user_index);
+          // The title reads the bindings again.
+          CallIdentityEngineLater(0x2C00F, {}, 0);
+        }
+      }
+      result = X_E_SUCCESS;
+      return true;
+    }
     case 0x2C009:
       // The title's identity engine registers its callback.
       if (!buffer) {
@@ -558,16 +655,81 @@ bool xeXamNuiDispatchMessage(uint32_t message, uint32_t buffer_ptr,
       return true;
     }
     case 0x2C00D: {
-      // Resolves whose face it is among up to 8 enrollments (4D5308C9):
-      // {scores, 0, 8 bytes, &result, size}. The answer is the enrollment, or
-      // 0xFFFFFFFE for nobody, which it is without enrollments.
+      // Whose face it is (4D5308C9, 4D530A1A): {match, 0, 8 bytes, &result,
+      // size}. For each of its 8 slots the title measured the face against
+      // the slot's enrolled face up to four times: a status (4 for no
+      // measurement) and a score (negative for none). The answer is the slot
+      // that matches best; a free slot (nothing measured, flag bit 0 clear)
+      // for someone new, whom the title then enrolls there when asked; or
+      // 0x80000000 for undecided.
       if (!buffer) {
         result = X_E_INVALIDARG;
         return true;
       }
+      const uint32_t match_ptr = xe::load_and_swap<uint32_t>(buffer);
       const uint32_t result_ptr = xe::load_and_swap<uint32_t>(buffer + 16);
-      if (result_ptr) {
-        *Guest<xe::be<uint32_t>>(result_ptr) = 0xFFFFFFFE;
+      const uint32_t match_size = xe::load_and_swap<uint32_t>(buffer + 20);
+      constexpr uint32_t kSlots = NUIController::kEnrollmentSlots;
+      // status[8][4], score[8][4], tracking ID, flags, slot flags[8].
+      constexpr uint32_t kMatchBytes = kSlots * 4 * 4 * 2 + 8 + kSlots * 4;
+      if (!match_ptr || !result_ptr || match_size < kMatchBytes) {
+        result = X_E_INVALIDARG;
+        return true;
+      }
+      const uint8_t* match = Guest<uint8_t>(match_ptr);
+      const uint32_t tracking_id =
+          xe::load_and_swap<uint32_t>(match + kSlots * 32);
+      int32_t best_slot = -1;
+      float best_score = 0.0f;
+      int32_t free_slot = -1;
+      // A free slot no profile is bound to, for someone new.
+      int32_t unbound_slot = -1;
+      for (uint32_t slot = 0; slot < kSlots; ++slot) {
+        float total = 0.0f;
+        uint32_t measured = 0;
+        for (uint32_t i = 0; i < 4; ++i) {
+          const uint32_t status =
+              xe::load_and_swap<uint32_t>(match + (slot * 4 + i) * 4);
+          const float score = xe::load_and_swap<float>(
+              match + kSlots * 16 + (slot * 4 + i) * 4);
+          if (status != 4 && score >= 0.0f) {
+            total += score;
+            ++measured;
+          }
+        }
+        const uint32_t slot_flags =
+            xe::load_and_swap<uint32_t>(match + kSlots * 32 + 8 + slot * 4);
+        if (!measured) {
+          if (!(slot_flags & 1)) {
+            if (free_slot < 0) {
+              free_slot = int32_t(slot);
+            }
+            if (unbound_slot < 0 && !nui->GetEnrollmentXuid(slot)) {
+              unbound_slot = int32_t(slot);
+            }
+          }
+          continue;
+        }
+        const float average = total / float(measured);
+        if (best_slot < 0 || average > best_score) {
+          best_slot = int32_t(slot);
+          best_score = average;
+        }
+      }
+      if (unbound_slot >= 0) {
+        free_slot = unbound_slot;
+      }
+      const uint32_t answer = best_slot >= 0   ? uint32_t(best_slot)
+                              : free_slot >= 0 ? uint32_t(free_slot)
+                                               : 0x80000000u;
+      *Guest<xe::be<uint32_t>>(result_ptr) = answer;
+      nui->SetAnsweredSlot(tracking_id, answer);
+      static uint32_t logged = 0;
+      if (best_slot >= 0 || logged < 16) {
+        ++logged;
+        XELOGI("Kinect ID: player {:08X} is slot {:X}{}", tracking_id, answer,
+               best_slot >= 0 ? fmt::format(" (score {:.3f})", best_score)
+                              : std::string(free_slot >= 0 ? " (new)" : ""));
       }
       result = X_E_SUCCESS;
       return true;
