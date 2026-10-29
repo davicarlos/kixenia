@@ -39,15 +39,20 @@ namespace kinect {
 
 namespace {
 
-// A window request (0x816FBCF8), big-endian: the buffers for the processed
-// mix and the four microphones, their sizes, and from +0x40 in a larger one
-// the tic the window was captured at and the time.
+// A window request (0x816FBCF8), big-endian: its size at +0, the buffers for
+// the processed mix and the four microphones, their sizes, and only when the
+// size says the request has room for them (xam checks > 0x40 and > 0x64)
+// the tic the window was captured at and the time. Sonic Free Riders keeps
+// two 0x44-byte requests back to back, so the time would land on the next.
+constexpr uint32_t kRequestSize = 0x00;
 constexpr uint32_t kRequestBuffers = 0x04;
 constexpr uint32_t kRequestSizes = 0x18;
 constexpr uint32_t kRequestTic = 0x40;
 constexpr uint32_t kRequestTimeHigh = 0x44;
 constexpr uint32_t kRequestTimeLow = 0x48;
 constexpr uint32_t kRequestChannels = 5;
+constexpr uint32_t kRequestSizeWithTic = 0x40;
+constexpr uint32_t kRequestSizeWithTime = 0x64;
 
 constexpr uint32_t kTicsPerWindow = 3;
 constexpr auto kTicPeriod = std::chrono::nanoseconds(5333333);
@@ -234,11 +239,17 @@ void KinectAudio::CompleteRequest(const Request& request, uint16_t tic) {
       }
     }
   }
-  xe::store_and_swap<uint16_t>(fields + kRequestTic, tic);
-  const uint64_t time = Clock::QueryGuestSystemTime();
-  xe::store_and_swap<uint32_t>(fields + kRequestTimeHigh,
-                               uint32_t(time >> 32));
-  xe::store_and_swap<uint32_t>(fields + kRequestTimeLow, uint32_t(time));
+  const uint32_t request_size =
+      xe::load_and_swap<uint32_t>(fields + kRequestSize);
+  if (request_size > kRequestSizeWithTic) {
+    xe::store_and_swap<uint16_t>(fields + kRequestTic, tic);
+  }
+  if (request_size > kRequestSizeWithTime) {
+    const uint64_t time = Clock::QueryGuestSystemTime();
+    xe::store_and_swap<uint32_t>(fields + kRequestTimeHigh,
+                                 uint32_t(time >> 32));
+    xe::store_and_swap<uint32_t>(fields + kRequestTimeLow, uint32_t(time));
+  }
   xboxkrnl::xeKeSetEvent(
       memory->TranslateVirtual<X_KEVENT*>(request.event_ptr), 1, 0);
 }
