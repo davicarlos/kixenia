@@ -18,7 +18,7 @@ Relacionado: [Kinect-Engenharia-Reversa](kinect-engenharia-reversa.md), [Kinect-
 | 0x81A73144 | 0x373 | UsbdGetNatalHardwareVersion |
 | 0x81A721F4 / 0x81A72204 / 0x81A72214 | 0x10 / 0x18 / 0x2BC | ExGetXConfigSetting / ExSetXConfigSetting / ExReadModifyWriteXConfigSettingUlong |
 
-- **Estado no Xenia**: lido das declarações `DECLARE_XAM_EXPORT` do branch. Contagem: 45 ausente; 58 kImplemented; 18 kSketchy; 15 kStub; 
+- **Estado no Xenia**: lido das declarações `DECLARE_XAM_EXPORT` do branch kixenia-main (2026-10-28). Contagem: 4 ausentes; 98 implementadas; 26 aproximadas; 8 stubs.
 
 ## Arquitetura
 
@@ -88,15 +88,15 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 |---|---|---|---|---|
 | 2198 | 0x816FA338 | `XamNuiCameraAdjustTilt` | 0xFE 0x2B00B {u32, float, float} → motor de inclinação do título | ✅ |
 | 2178 | 0x816FA3B8 | `XamNuiCameraElevationAutoTilt` | 0xFE 0x2B005 {float} → motor de inclinação do título | ✅ |
-| 2177 | 0x816FAF68 | `XamNuiCameraElevationGetAngle` | lê o status ('XtSs', 0x50 bytes), atan2 do acelerômetro × 57,3 + deslocamento; também o estado (&3) | 🟡 |
+| 2177 | 0x816FAF68 | `XamNuiCameraElevationGetAngle` | lê o status ('XtSs', 0x50 bytes), atan2 do acelerômetro × 57,3 + deslocamento; também o estado (&3) | ✅ |
 | 2188 | 0x816FA418 | `XamNuiCameraElevationReverseAutoTilt` | 0xFE 0x2B00A {u32} → motor de inclinação do título | ✅ |
-| 2176 | 0x816FA0D0 | `XamNuiCameraElevationSetAngle` | FUN_8180C700(0xDEADBEEF, ângulo − 0x81AAC9D0): Detroit 0x33148/0x3314C ou Mca | 🟡 |
+| 2176 | 0x816FA0D0 | `XamNuiCameraElevationSetAngle` | FUN_8180C700(0xDEADBEEF, ângulo − 0x81AAC9D0): Detroit 0x33148/0x3314C ou Mca | ✅ |
 | 2180 | 0x816FA168 | `XamNuiCameraElevationSetCallback` | 0xFE 0x2B00D: registra quem ouve o status (0x81A85C20) | ✅ |
-| 2179 | 0x816FA520 | `XamNuiCameraElevationStopMovement` | Detroit {0x3304} ou Mca {0x24}, depois 0xFE 0x2B009 ao motor do título | 🟡 |
+| 2179 | 0x816FA520 | `XamNuiCameraElevationStopMovement` | Detroit {0x3304} ou Mca {0x24}, depois 0xFE 0x2B009 ao motor do título | ✅ |
 | 2159 | 0x816FA088 | `XamNuiCameraGetTiltControllerType` | UsbdGetNatalHardwareVersion (kernel 0x373): 1 = Detroit (1414), 2 = Mca (1473), 0 = nenhum | ✅ |
-| 2149 | 0x816FA618 | `XamNuiCameraRememberFloor` | guarda o plano do chão (4 floats em 0x81AAC9E0) e lê o status do motor (0x48 bytes) | 🟡 exige o motor e só registra o plano |
+| 2149 | 0x816FA618 | `XamNuiCameraRememberFloor` | guarda o plano do chão (4 floats em 0x81AAC9E0) e lê o status do motor (0x48 bytes) | ✅ |
 | 2148 | 0x816FB000 | `XamNuiCameraSetFlags` | Detroit: lê o status e grava flags com o comando 0xF0510; Mca: nada | ✅ |
-| 2160 | 0x816FAA60 | `XamNuiCameraTiltGetStatus` | status 'XtSs' de 0x50 bytes a partir do bloco de 0x48 do motor (Detroit 0xF0410, 0x45 bytes; Mca código 0x23) | 🟡 |
+| 2160 | 0x816FAA60 | `XamNuiCameraTiltGetStatus` | status 'XtSs' de 0x50 bytes a partir do bloco de 0x48 do motor (Detroit 0xF0410, 0x45 bytes; Mca código 0x23) | ✅ |
 | 2197 | 0x816FA1A8 | `XamNuiCameraTiltReportStatus` | o título informa 0x2B006 (0x10) ou 0x2B00C (0xE0) → callback de 0x81A85C20 | ✅ |
 | 2157 | 0x816FA128 | `XamNuiCameraTiltSetCallback` | 0xFE 0x2B007: registra o motor de inclinação do título (0x81A85C40) | ✅ |
 
@@ -104,18 +104,18 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 
 | Ordinal | Endereço | Função | O que faz | Xenia |
 |---|---|---|---|---|
-| 2171 | 0x81964638 | `XamIsNatalPlaybackEnabled` | sempre 0 (mesma função de 0x81964638) | ⚪ stub |
-| 2170 | 0x81964638 | `XamIsNuiAutomationEnabled` | sempre 0 (0x81964638 devolve 0) | ⚪ stub |
+| 2171 | 0x81964638 | `XamIsNatalPlaybackEnabled` | sempre 0 (mesma função de 0x81964638) | ✅ |
+| 2170 | 0x81964638 | `XamIsNuiAutomationEnabled` | sempre 0 (0x81964638 devolve 0) | ✅ |
 | 1036 | 0x816C7D88 | `XamIsNuiUIActive` | lê 0x81AA218C (HUD ativo) | ✅ |
 | 2137 | 0x817F8DE8 | `XamNatalDeviceAudioCalibrate` | envia MicArrayCalibrate.mec ao sensor (CEMD 0) | ✅ |
 | 2142 | 0x816F9ED8 | `XamNuiEnableChatMic` | bit 0x8 de XCONFIG_CONSOLE_NUI + XamVoiceMuteMicArray | ✅ |
-| 2272 | 0x816F9B90 | `XamNuiGetCameraIntrinsics` | PsCam 46, seletor 0x100: fx, fy, cx, cy | 🟡 valores nominais |
+| 2272 | 0x816F9B90 | `XamNuiGetCameraIntrinsics` | PsCam 46, seletor 0x100: fx, fy, cx, cy da câmera de profundidade | ✅ focal do plano zero do sensor |
 | 2144 | 0x816F9990 | `XamNuiGetDepthCalibration` | lê 0x30 bytes de um registro de configuração (0x3E00) | ✅ |
 | 2269 | 0x817F99A0 | `XamNuiGetDeviceSerialNumber` | Detroit 0x770D4 (0x20 bytes) ou Mca 0x2B, até 3 tentativas | ✅ |
-| 2181 | 0x817FC990 | `XamNuiGetDeviceStatus` | FUN_817FC750 (estado, NTSTATUS do sensor e flags); sensor desligado: 0xC000009D | ⚪ stub |
-| 2273 | 0x816F9BF0 | `XamNuiGetFanRate` | pedido > 2000 → PsCam 20, propriedade 0x838; byte 7 = ventilador | ❌ |
+| 2181 | 0x817FC990 | `XamNuiGetDeviceStatus` | FUN_817FC750 (estado, NTSTATUS do sensor e flags); sensor desligado: 0xC000009D | ✅ |
+| 2273 | 0x816F9BF0 | `XamNuiGetFanRate` | propriedade 0x838 pelo PsCam 20 (`{1, valor, 0, 0, 0}`); byte baixo do valor = ventilador | 🟡 lê o GET_PARAM 0x838 do firmware, que responde 0 |
 | 2270 | 0x816F9A48 | `XamNuiGetLoadedDepthCalibration` | PsCam 44 → dois u32 (A e B da calibração) | ✅ |
-| 2274 | 0x817FA2E0 | `XamNuiGetSupportString` | "K:%02d:...:%12s": modo, estado, problema, versão do firmware, série | 🟡 |
+| 2274 | 0x817FA2E0 | `XamNuiGetSupportString` | "K:%02d:...:%12s": modo, estado, problema, versão do firmware, série | ✅ |
 | 2271 | 0x816F9B38 | `XamNuiGetTrueColorInfo` | PsCam 46: seletor 0 (4 bytes), 1 (tabela de autoexposição de 12 bytes por entrada) | 🟡 |
 | 2143 | 0x816F9E90 | `XamNuiIsChatMicEnabled` | !(bit 0x8 de XCONFIG_CONSOLE_NUI) | ✅ |
 | 2192 | 0x817F9988 | `XamNuiIsDeviceReady` | bit 1 de 0x81AD127C | ✅ |
@@ -129,7 +129,7 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 | Ordinal | Endereço | Função | O que faz | Xenia |
 |---|---|---|---|---|
 | 2174 | 0x816DE4C8 | `ControlpackNuiCursorSetTrackingId` | função não definida pelo Ghidra (prólogo em 0x816DE4C8): lê os dados biométricos do perfil (armazém 0x18) e confere a data dos rostos cadastrados; o nome na tabela do Xenia parece errado | ❌ |
-| 2173 | 0x816C7EB8 | `XamNuiHudEnableInputFilter` | com HUD: FUN_81692C48(0x81AA2160, p) | 🟡 |
+| 2173 | 0x816C7EB8 | `XamNuiHudEnableInputFilter` | com HUD: FUN_81692C48(0x81AA2160, p) | ✅ |
 | 1307 | 0x816ACCE8 | `XamNuiHudGetEngagedEnrollmentIndex` | cópia do quadro do HUD: cadastro do engajado, ou −2 | ✅ |
 | 2106 | 0x816AC408 | `XamNuiHudGetEngagedTrackingID` | HUD+0x118 | ✅ |
 | 2175 | 0x816AC510 | `XamNuiHudGetInitializeFlags` | 0x81AAC990 (flags da 0x2B003) | ✅ |
@@ -146,11 +146,11 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 | Ordinal | Endereço | Função | O que faz | Xenia |
 |---|---|---|---|---|
 | 2199 | 0x8180D910 | `XamNuiIdentityAbort` | 0xFE 0x2C00E | ✅ |
-| 2162 | 0x8180D970 | `XamNuiIdentityEnrollForSignIn` | 0xFE 0x2C010 {usuário, p2, p4} | ⚪ stub |
+| 2162 | 0x8180D970 | `XamNuiIdentityEnrollForSignIn` | 0xFE 0x2C010 {usuário, p2, p4} | ✅ |
 | 2140 | 0x8180DF08 | `XamNuiIdentityGetColorTexture` | callback 0x2C011 → cabeçalho de textura (XGSetTextureHeaderEx) | 🟡 |
 | 2138 | 0x8180E048 | `XamNuiIdentityGetEnrollmentInfo` | callback 0x2C013 → dois u32 | ✅ |
-| 2161 | 0x8180D9E8 | `XamNuiIdentityGetQualityFlags` | 0xFE 0x2C008 (tarefa assíncrona) | ❌ |
-| 2156 | 0x816F9B30 | `XamNuiIdentityGetQualityFlagsMessage` | PsCam 40 com dois u32 | ❌ |
+| 2161 | 0x8180D9E8 | `XamNuiIdentityGetQualityFlags` | 0xFE 0x2C008 (tarefa assíncrona) | 🟡 |
+| 2156 | 0x816F9B30 | `XamNuiIdentityGetQualityFlagsMessage` | PsCam 40 com dois u32 | 🟡 |
 | 2163 | 0x8180DAC8 | `XamNuiIdentityGetSessionId` | 8 bytes aleatórios, criados na primeira chamada | ✅ |
 | 2164 | 0x8180DA50 | `XamNuiIdentityIdentifyWithBiometric` | 0xFE 0x2C007 → callback + tarefa assíncrona do xam | 🟡 pelo vínculo do índice de cadastro, sem o motor de identidade |
 | 2139 | 0x8180DFE0 | `XamNuiIdentityUnenroll` | callback 0x2C012 | ✅ |
@@ -170,10 +170,10 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 | Ordinal | Endereço | Função | O que faz | Xenia |
 |---|---|---|---|---|
 | 1347 | 0x816C5D98 | `XamShowCsvTransitionUI` | tela da Live (não Kinect) | ❌ |
-| 1209 | 0x816C5C50 | `XamShowFitnessBodyProfileUI` | UI 0x2103A | ❌ |
-| 1273 | 0x816C5BD8 | `XamShowFitnessClearUI` | UI 0x21040 | ❌ |
-| 1244 | 0x816C5D20 | `XamShowFitnessWarnAboutPrivacyUI` | UI 0x2103C | ❌ |
-| 1245 | 0x816C5CC8 | `XamShowFitnessWarnAboutTimeUI` | UI 0x2103B | ❌ |
+| 1209 | 0x816C5C50 | `XamShowFitnessBodyProfileUI` | UI 0x2103A | ✅ |
+| 1273 | 0x816C5BD8 | `XamShowFitnessClearUI` | UI 0x21040 | ⚪ stub |
+| 1244 | 0x816C5D20 | `XamShowFitnessWarnAboutPrivacyUI` | UI 0x2103C | 🟡 |
+| 1245 | 0x816C5CC8 | `XamShowFitnessWarnAboutTimeUI` | UI 0x2103B | 🟡 |
 | 1134 | 0x816C4718 | `XamShowNuiAchievementsUI` | NuiHudCheck + conquistas (0x21008) | ✅ |
 | 1135 | 0x816C4010 | `XamShowNuiCommunitySessionsUI` | NuiHudCheck; precisa de Live | ✅ |
 | 1147 | 0x816C21C8 | `XamShowNuiControllerRequiredUI` | NuiHudCheck + caixa de mensagem 0x72000 | ✅ |
@@ -193,7 +193,7 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 | 1199 | 0x816C3DF0 | `XamShowNuiMessagesUI` | NuiHudCheck + 0x21038 (Live) | ✅ |
 | 1144 | 0x816C3F00 | `XamShowNuiPartyUI` | NuiHudCheck + 0x21034 (com festa ativa) | ✅ |
 | 1146 | 0x816C1968 | `XamShowNuiSigninUI` | NuiHudCheck + login (FUN_816C1868) | 🟡 |
-| 1131 | 0x816C5F68 | `XamShowNuiTroubleshooterUI` | sem sensor: caixa de mensagem (textos 0x11F/0x4F); com sensor: engaja e abre o Tuner (0x21028), modo 2, 3 ou 5 | ⚪ stub |
+| 1131 | 0x816C5F68 | `XamShowNuiTroubleshooterUI` | sem sensor: caixa de mensagem (textos 0x11F/0x4F); com sensor: engaja e abre o Tuner (0x21028), modo 2, 3 ou 5 | ✅ |
 | 1266 | 0x816C3B78 | `XamShowNuiVideoRichPresenceUI` | NuiHudCheck + IO 0x21025 | 🟡 |
 | 737 | 0x816C29E8 | `XamShowPersonalizationUI` | tela comum (não Kinect) | ❌ |
 | 724 | 0x816C24C8 | `XamShowReputationUI` | tela comum (não Kinect) | ❌ |
@@ -207,19 +207,19 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 |---|---|---|---|---|
 | 783 | 0x816FC1C8 | `XamVoiceClose` | voz (kernel XVoiced*) | ⚪ stub |
 | 780 | 0x816FC098 | `XamVoiceCreate` | voz (kernel XVoiced*) | ⚪ stub |
-| 1169 | 0x816C3750 | `XamVoiceDisableMicArray` | UI 0x2100E (0x88 bytes) | ❌ |
-| 784 | 0x816FB3C8 | `XamVoiceGetBatteryStatus` | kernel XVoiced* | ❌ |
-| 794 | 0x816FB450 | `XamVoiceGetDirectionalData` | kernel XVoicedGetDirectionalData (0x327) | ❌ |
-| 988 | 0x816FBCA0 | `XamVoiceGetMicArrayAudio` | kernel XVoiced* | ❌ |
-| 1168 | 0x816FBCF8 | `XamVoiceGetMicArrayAudioEx` | kernel XVoiced* | 🟡 |
-| 1190 | 0x816FBE10 | `XamVoiceGetMicArrayFilenameDesc` | texto localizado 100 | ❌ |
+| 1169 | 0x816C3750 | `XamVoiceDisableMicArray` | UI 0x2100E (0x88 bytes) | 🟡 |
+| 784 | 0x816FB3C8 | `XamVoiceGetBatteryStatus` | kernel XVoiced* | ✅ |
+| 794 | 0x816FB450 | `XamVoiceGetDirectionalData` | kernel XVoicedGetDirectionalData (0x327) | ✅ |
+| 988 | 0x816FBCA0 | `XamVoiceGetMicArrayAudio` | kernel XVoiced* | ✅ |
+| 1168 | 0x816FBCF8 | `XamVoiceGetMicArrayAudioEx` | kernel XVoiced* | ✅ |
+| 1190 | 0x816FBE10 | `XamVoiceGetMicArrayFilenameDesc` | texto localizado 100 | 🟡 |
 | 792 | 0x816FBBE8 | `XamVoiceGetMicArrayStatus` | 2 sem matriz; senão o sinal de 0x81AACBF8 | ✅ |
-| 1166 | 0x816FBD50 | `XamVoiceGetMicArrayUnderrunStatus` | McaDeviceRequest código 0x20 → falta de dados (bits 0/1) e contagem | 🟡 |
+| 1166 | 0x816FBD50 | `XamVoiceGetMicArrayUnderrunStatus` | McaDeviceRequest código 0x20 → falta de dados (bits 0/1) e contagem | ✅ |
 | 781 | 0x816FB418 | `XamVoiceHeadsetPresent` | kernel XVoiced* | ⚪ stub |
 | 1175 | 0x816FB4D0 | `XamVoiceIsActiveProcess` | kernel XVoiced* | ⚪ stub |
-| 1165 | 0x816FBA08 | `XamVoiceMuteMicArray` | kernel XVoiced* | ❌ |
-| 1158 | 0x816FBB28 | `XamVoiceRecordUserPrivileges` | privilégios de voz | ❌ |
-| 793 | 0x816FBD58 | `XamVoiceSetAudioCaptureRoutine` | kernel XVoiced* | ❌ |
+| 1165 | 0x816FBA08 | `XamVoiceMuteMicArray` | kernel XVoiced* | 🟡 |
+| 1158 | 0x816FBB28 | `XamVoiceRecordUserPrivileges` | privilégios de voz | ✅ |
+| 793 | 0x816FBD58 | `XamVoiceSetAudioCaptureRoutine` | kernel XVoiced* | ✅ |
 | 1187 | 0x816FBD60 | `XamVoiceSetMicArrayBeamAngle` | CEMD 5 ao sensor | ✅ |
 | 1164 | 0x816FB9C0 | `XamVoiceSetMicArrayIdleUsers` | usuários ociosos da matriz | ✅ |
 | 782 | 0x816FB498 | `XamVoiceSubmitPacket` | kernel XVoiced* | ⚪ stub |
@@ -228,29 +228,29 @@ kernel: PsCam (câmera), Mca (áudio), Detroit (hub), XConfig
 
 | Ordinal | Endereço | Função | O que faz | Xenia |
 |---|---|---|---|---|
-| 1210 | 0x8168FA00 | `XamFitnessAddBodyProfileRecord` | 0xFB 0xB0079: grava registro do corpo (pacote + verificação síncrona) | ❌ |
-| 1222 | 0x8168FB40 | `XamFitnessAddFitnessEvent` | 0xFB 0xB007A: grava evento de exercício | ❌ |
-| 1274 | 0x8168F0E0 | `XamFitnessClearAll` | 0xFB 0xB0084 {usuário, p2} | ❌ |
-| 1217 | 0x81698BF8 | `XamFitnessClearBodyProfileRecords` | não fala com a Live: devolve 3 valores em cache (0x10 bytes) | ❌ |
-| 1447 | 0x8168F990 | `XamFitnessContainsFitnessData` | 0xFB 0xB0089 | ❌ |
-| 1240 | 0x8168F568 | `XamFitnessConvertByteMetToFloatMet` | byte × 0,1 | ❌ |
-| 1250 | 0x8168F5B0 | `XamFitnessConvertFloatMetToByteMet` | (int)(float × 10) | ❌ |
-| 1227 | 0x8168FCF0 | `XamFitnessCreateFitnessEventEnumerator` | 0xFB 0xB007F/0xB0009: enumerador de eventos (itens de 0x24) | ❌ |
-| 1219 | 0x8168F328 | `XamFitnessGetAllBodyProfileRecords` | 0xFB 0xB007C | ❌ |
-| 1220 | 0x8168F2C8 | `XamFitnessGetAllTitleSummaries` | 0xFB 0xB007D | ❌ |
-| 1218 | 0x8168F168 | `XamFitnessGetCurrentBodyProfileRecord` | 0xFB 0xB007B (síncrono) | ❌ |
-| 1221 | 0x8168F3D8 | `XamFitnessGetOverallSummary` | 0xFB 0xB007E | ❌ |
-| 1275 | 0x8168F688 | `XamFitnessGetPrivacySettings` | configuração de perfil 0x10040000 + privilégio 6 → valor 0 a 6 | ❌ |
-| 1316 | 0x8168F8C0 | `XamFitnessGetSuggestedPrivacySettings` | 6, ou 3/4 conforme a região | ❌ |
-| 1314 | 0x8168F830 | `XamFitnessGetSyncStatus` | 0xFB 0xB0085 | ❌ |
-| 1444 | 0x8168F2E8 | `XamFitnessGetTitleSummaries` | 0xFB 0xB007D | ❌ |
-| 1445 | 0x8168F308 | `XamFitnessGetTitleSummary` | 0xFB 0xB007D (um título) | ❌ |
-| 1228 | 0x8168F4E0 | `XamFitnessInitialize` | 0xFB 0xB0080 (síncrono) | ❌ |
-| 1315 | 0x8168F470 | `XamFitnessInitializeForOneUser` | 0xFB 0xB0086 | ❌ |
-| 1242 | 0x8168FC78 | `XamFitnessMsgTimeToSystemTime` | segundos desde 2003-01-01 → SYSTEMTIME | ❌ |
-| 1243 | 0x8168F5E8 | `XamFitnessSystemTimeToMsgTime` | o inverso | ❌ |
-| 1246 | 0x8168F530 | `XamFitnessUnInitialize` | 0xFB 0xB0081 | ❌ |
-| 1317 | 0x8168F550 | `XampFitnessLetFireAndForgetsCatchUpInternal` | 0xFB 0xB0088: espera as gravações assíncronas pendentes | ❌ |
+| 1210 | 0x8168FA00 | `XamFitnessAddBodyProfileRecord` | 0xFB 0xB0079: grava registro do corpo (pacote + verificação síncrona) | ✅ |
+| 1222 | 0x8168FB40 | `XamFitnessAddFitnessEvent` | 0xFB 0xB007A: grava evento de exercício | ✅ |
+| 1274 | 0x8168F0E0 | `XamFitnessClearAll` | 0xFB 0xB0084 {usuário, p2} | ✅ |
+| 1217 | 0x81698BF8 | `XamFitnessClearBodyProfileRecords` | não fala com a Live: devolve 3 valores em cache (0x10 bytes) | 🟡 |
+| 1447 | 0x8168F990 | `XamFitnessContainsFitnessData` | 0xFB 0xB0089 | ✅ |
+| 1240 | 0x8168F568 | `XamFitnessConvertByteMetToFloatMet` | byte × 0,1 | ✅ |
+| 1250 | 0x8168F5B0 | `XamFitnessConvertFloatMetToByteMet` | (int)(float × 10) | ✅ |
+| 1227 | 0x8168FCF0 | `XamFitnessCreateFitnessEventEnumerator` | 0xFB 0xB007F/0xB0009: enumerador de eventos (itens de 0x24) | 🟡 |
+| 1219 | 0x8168F328 | `XamFitnessGetAllBodyProfileRecords` | 0xFB 0xB007C | 🟡 |
+| 1220 | 0x8168F2C8 | `XamFitnessGetAllTitleSummaries` | 0xFB 0xB007D | 🟡 |
+| 1218 | 0x8168F168 | `XamFitnessGetCurrentBodyProfileRecord` | 0xFB 0xB007B (síncrono) | ✅ |
+| 1221 | 0x8168F3D8 | `XamFitnessGetOverallSummary` | 0xFB 0xB007E | 🟡 |
+| 1275 | 0x8168F688 | `XamFitnessGetPrivacySettings` | configuração de perfil 0x10040000 + privilégio 6 → valor 0 a 6 | ✅ |
+| 1316 | 0x8168F8C0 | `XamFitnessGetSuggestedPrivacySettings` | 6, ou 3/4 conforme a região | ✅ |
+| 1314 | 0x8168F830 | `XamFitnessGetSyncStatus` | 0xFB 0xB0085 | ✅ |
+| 1444 | 0x8168F2E8 | `XamFitnessGetTitleSummaries` | 0xFB 0xB007D | 🟡 |
+| 1445 | 0x8168F308 | `XamFitnessGetTitleSummary` | 0xFB 0xB007D (um título) | 🟡 |
+| 1228 | 0x8168F4E0 | `XamFitnessInitialize` | 0xFB 0xB0080 (síncrono) | ✅ |
+| 1315 | 0x8168F470 | `XamFitnessInitializeForOneUser` | 0xFB 0xB0086 | ✅ |
+| 1242 | 0x8168FC78 | `XamFitnessMsgTimeToSystemTime` | segundos desde 2003-01-01 → SYSTEMTIME | ✅ |
+| 1243 | 0x8168F5E8 | `XamFitnessSystemTimeToMsgTime` | o inverso | ✅ |
+| 1246 | 0x8168F530 | `XamFitnessUnInitialize` | 0xFB 0xB0081 | ✅ |
+| 1317 | 0x8168F550 | `XampFitnessLetFireAndForgetsCatchUpInternal` | 0xFB 0xB0088: espera as gravações assíncronas pendentes | ✅ |
 
 ### Outras
 

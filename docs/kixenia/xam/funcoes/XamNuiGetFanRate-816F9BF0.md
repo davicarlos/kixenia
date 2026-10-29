@@ -3,7 +3,7 @@
 **Endereço:** 0x816F9BF0 · **Ordinal:** 2273 · **Área:** [Sensor e estado](README.md#sensor-e-estado) · **Xenia:** ❌ ausente
 
 ## O que faz
-pedido > 2000 → PsCam 20, propriedade 0x838; byte 7 = ventilador
+propriedade 0x838 por FUN_819838D0 (acima de 2000 → PsCam 20, resposta {1, valor, 0, 0, 0}); byte 7 = byte baixo do valor = ventilador; o GET_PARAM 0x838 do firmware responde 0
 
 ## Chama
 - Outras: FUN_819838D0

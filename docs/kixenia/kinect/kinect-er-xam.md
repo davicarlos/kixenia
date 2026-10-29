@@ -301,3 +301,35 @@ As duas são PsCam código 46: `{0x2E, seletor, buffer, tamanho, &devolvido}`; a
 - **Teste por simulação:** quadro 2000 de `~/kinect_rec_guia` com o braço esquerdo caído apagado e um braço desenhado a 45° na profundidade do ombro (`armsim`, no scratchpad). O rastreador do Kinect Sports mediu 43° (down 0,73, side 0,66) e o guia abriu após 3 s. Gravação sintética em `~/kinect_sim_guia` (540 quadros, em loop).
 - **Testes ao vivo:** o usuário levantava o braço até a horizontal e voltava, passando pela faixa por menos de 1 s. Os alertas que o rebaixavam eram "perto demais" (0,42 e 0,85 m) e "borda".
 - Formato das gravações: profundidade 640×480 em 11 bits empacotados do bit mais alto (422.400 bytes); cor Bayer 640×480 (307.200 bytes); `calibration.bin` de 142 bytes; a reprodução fica em loop.
+
+## 16g. PsCam 20 e as intrínsecas (2026-10-28)
+
+### As propriedades do sensor (`FUN_819838D0`)
+O xam lê propriedades do Kinect por número, em três faixas, cada uma por um driver do kernel:
+
+| Faixa | Função | Driver | Pedido |
+|---|---|---|---|
+| 1 a 1000 | `FUN_81983490` | `McaDeviceRequest` (matriz de microfones) | código 0x10 com o número; resposta copiada (0x20 bytes) |
+| 1001 a 2000 | `FUN_819835B0` | `DetroitDeviceRequest` | pedido com 0x120000 no cabeçalho; 0x3E9 a 0x3ED têm conversões (÷ 0x319750 etc.) |
+| acima de 2000 | `FUN_819837A8` | `PsCamDeviceRequest` **código 20** (0x14) | número da propriedade; resposta de um u32 |
+
+Quando o tipo de inclinação (`FUN_816FA088`) é 1 ou 2, as propriedades 0x42/0x43/0x45 e 0x3EB/0x3EC/0x3ED trocam de driver entre Mca e Detroit: o mesmo dado vem de placas diferentes conforme o modelo do sensor.
+
+A resposta do PsCam 20 vira uma estrutura de **5 palavras** `{1, valor, a, b, c}`, em que `a`, `b` e `c` repetem o valor ou ficam 0 conforme a propriedade (0x7DE a 0x7E5 pares → `b`; ímpares → `c`; 0x7E6 a 0x7EA e 0x834 a 0x839 → zeros; 0x83A em diante → `a` e `c`). `XamNuiGetFanRate` pede a **0x838** e devolve o byte 7 da estrutura: o **byte baixo do valor**.
+
+### Sonda no firmware da câmera
+Com uma sonda libusb (`GET_PARAM`, comando 0x02, resposta `{status u16, valor u16}`), o firmware do sensor daqui respondeu:
+- 0x12 (formato de profundidade) = 3, 0x06 (fluxo de profundidade) = 2: o comando funciona.
+- **0x838 = 0**, e também 0 para **todas** as propriedades de 0x7DE a 0x83F, antes e durante 4 minutos com o projetor e as duas câmeras ligados. O firmware responde 0 com status 0 até para IDs inválidos (0xFFFF), então não dá para distinguir "ventilador parado" de "propriedade desconhecida".
+- `GET_CMOS_REGISTER` (0x0E) e `READ_AHB` (0x10) com 0x838 dão erro (status 7 e 0xC).
+
+Ou seja: **se** o driver PsCam do console repassa o número da propriedade ao `GET_PARAM`, o ventilador estava parado; se ele traduz o número para outro comando, não se sabe qual. Só o kernel real (na cadeia de bootloaders da NAND, ainda não decifrada) responderia.
+
+**No Xenia:** `UsbCamera::ReadParameter(id)` manda o `GET_PARAM` à câmera ao vivo (`false` em gravações), e `XamNuiGetFanRate` devolve o byte baixo da 0x838: hoje, 0 como o sensor. Continua 🟡.
+
+### As intrínsecas (PsCam 46, seletor 0x100)
+No Dash.FieldCalibration.lex (`FUN_9BD22C38`), os 4 floats entram numa matriz 3×3 de doubles: `[0][0]` = 1º, `[1][1]` = 2º, `[0][2]` = 3º, `[1][2]` = 4º, ou seja **fx, fy, cx, cy**, e a matriz serve ao cálculo da calibração da **profundidade** (A e B, seção acima). Logo são as intrínsecas da **câmera de profundidade**, não da de cor.
+
+O sensor guarda no bloco de parâmetros fixos (comando 0x04, 334 bytes, plano zero no byte 94) a distância de referência (120 mm) e o tamanho do pixel nessa distância (0,1042 mm): a focal em pixels a 640×480 é `120 / (2 × 0,1042)` = **575,8** (nominal do SDK do Kinect: 571,26; a da câmera de cor, 531,15, era o que o Xenia devolvia antes). Nenhum dos floats da tabela de exposição (49,1; 7,5; 0,1333) nem o 34,19 do seletor 0 aparecem nesse bloco: a tabela do `XamNuiGetTrueColorInfo` continua a dos jogos.
+
+**No Xenia:** `UsbCamera::DepthFocalLength()` calcula a focal da calibração (também da `calibration.bin` das gravações), e `XamNuiGetCameraIntrinsics` devolve `{focal, focal, 320, 240}`. Passa a ✅.

@@ -3,7 +3,7 @@
 **Endereço:** 0x816F9B90 · **Ordinal:** 2272 · **Área:** [Inclinação e motor](README.md#inclinação-e-motor) · **Xenia:** ❌ ausente
 
 ## O que faz
-PsCam 46, seletor 0x100
+PsCam 46, seletor 0x100: fx, fy, cx, cy da câmera de profundidade (a matriz 3×3 do Dash.FieldCalibration); no Xenia, a focal vem do plano zero do sensor
 
 ## Fatos do decompilado
 - Kernel: PsCamDeviceRequest (xboxkrnl 0x30D)

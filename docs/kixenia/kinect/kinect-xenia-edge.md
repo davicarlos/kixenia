@@ -167,7 +167,7 @@ Implementadas:
 - `XamNuiIdentityIdentifyWithBiometric`: o usuário vinculado ao índice de cadastro do esqueleto no último quadro (0xFE se ninguém). Completa o overlapped e devolve 0x800703E5, que o nuihud.xex espera. `XamNuiIdentityAbort` responde sucesso.
 - `XamHudGetUserIndex` / `XamHudSetUserIndex` (0xFF = ninguém).
 - `XamNuiGetLoadedDepthCalibration` e o **PsCam 44**: A e B dos primeiros 8 bytes de `kinect_depth_calibration.bin`, ou 1,0 e 0 sem calibração.
-- `XamNuiGetCameraIntrinsics`: fx, fy, cx, cy nominais da câmera de cor a 640×480 (531,15; 531,15; 320; 240). A ordem vem da matriz do Dash.FieldCalibration.lex (`FUN_9BD22C38`).
+- `XamNuiGetCameraIntrinsics`: fx, fy, cx, cy da **câmera de profundidade** a 640×480: a focal vem do plano zero da calibração do sensor (`distância de referência / (2 × tamanho do pixel)` = 575,8 no sensor daqui; nominal 571,26), e o centro é 320 × 240. A ordem vem da matriz do Dash.FieldCalibration.lex (`FUN_9BD22C38`); até 2026-10-28 devolvia os nominais da câmera de cor (531,15). Ver [Kinect-ER-xam, 16g](kinect-er-xam.md#16g-pscam-20-e-as-intrínsecas-2026-10-28).
 - `XamNuiCameraRememberFloor`: o plano vem **por valor**, dois floats em cada registrador (r3 = normal x, y; r4 = normal z e a altura, ~854 no Nike, provavelmente mm). Exige motor do tipo 1 ou 2, como o xam, e registra o plano no log. A inclinação automática do Xenia acha o chão sozinha.
 - `XamPackageManagerFindPackageContainingIndexedXEX`: 0x80070057 sem saída; senão "não encontrado", porque não há pacotes do sistema.
 - **0x2B00E:** guarda o observador de quadros, que é chamado com cada quadro antes do HUD, como em `FUN_816F9FC0`; a 0x2B004 o apaga.
@@ -247,7 +247,12 @@ Cada afirmação desta seção foi conferida no `xam_17559.exe` com o REA (`batc
 | Gesto do guia por simulação (`kinect_sim_guia`) | abriu o guia após 3 s (a56454014); com as regras exatas (277a3de5b) o quadro de base reprova (braço direito dobrado, tronco 14°) |
 | Diagnóstico "o esqueleto some" (2026-10-25) | USB sem perda (6.600 + 6.600 quadros), ritmo igual; a gravação ao vivo reproduzida dá o **mesmo** rastreamento (12% × 12%): nos trechos sem esqueleto **não há ninguém** na imagem |
 | Tipo do motor 2 (6cb02fa57) | Nike 973 e Kinect Sports 1145 quadros rastreados nas gravações, sem mudança de comportamento |
-| Firmware travado depois de `kill -9` | o motor recusou comandos e o Kinect Sports travou ao carregar; resolvido tirando o Kinect da tomada. Fechar o Xenia sempre pela janela |
+| Firmware travado depois de `kill -9` | o motor recusou comandos e o Kinect Sports travou ao carregar; resolvido tirando o Kinect da tomada. **Corrigido por software em 87e867055** (2026-10-28): o endpoint de comandos do firmware de áudio fica travado (bulk para 0x01 dá timeout) com a resposta do último comando pendente; `clear_halt` destrava mas devolve a resposta velha; `libusb_reset_device` resolve sem reiniciar o firmware. Na abertura, lê o estado e reseta se não responde |
+| **Bateria ao vivo de 2026-10-28** (3 min por jogo, 33 jogos, roteiro `scratchpad/live/rodar.sh`) | **Passaram** (sem crash, Kinect aberto): Kinect Sports Ultimate, Nike, Adventures (5 avatares), Joy Ride, Rush, Star Wars (xex e GoD), Dance Central 3, Dance Paradise (4 avatares), Fighters Uncaged, Just Dance 4 e 2015, PowerUp Heroes (9 avatares), Black Eyed Peas, Hip Hop Dance, UFC Trainer, Your Shape, Zumba Core/World Party/Kids, Harry Potter, Rabbids, Motion Explosion (14 avatares), Rapala, Sesame Street, Crossboard 7, Fable, Doodle Jump, Fruit Ninja, Carnival, Adrenalin, Kinect Sports Season Two (GoD). **Travou:** Michael Jackson (GoD): `d:\Common\Font\base.fnt` não existe no pacote → ponteiro nulo em 0x82FCFF00; conferir o pacote |
+| Crash do Kinect Sports ao montar o avatar do jogador (2026-10-28) | `allow_avatar_initialization=false` fazia o `XamAvatarInitialize` falhar; o jogo não trata e lê uma tabela nula (0x82558F30) quando alguém entra na frente do sensor. Padrão agora `true` (ae5917d1e) |
+| Crash do Kinect Adventures ao montar o primeiro avatar (2026-10-28) | estouro de pilha em 0x82A73418: percorre o esqueleto do resultado do GetAssets, que saía vazio. Esqueleto padrão do xam implementado (f0f7c2a9c); veja [Avatares](../avatares/README.md) |
+| Jogos em GoD/XBLA não abriam o Kinect ID (`Database.xmplr` dentro da imagem) | Doodle Jump e Michael Jackson travavam num ponteiro nulo, Fruit Ninja/Carnival/Adrenalin/Season Two ficavam num menu; `OpenContentFromGuestFile` agora copia o arquivo da imagem para um temporário (ebdb8cbe8) |
+| Motion Explosion: "no room for the component 0020" | uma peça com máscara 0x0208 reservava espaço pelo bit 0x200, fora do pedido 0x3F; a reserva passou a ser `máscara da peça ∧ pedida` |
 
 ## Ferramentas de teste (`~/Kixenia/kinect-tools`)
 - `live_test.sh <log> [xex] [opções]`: roda um jogo com o sensor real (firmware do pacote do system update, armazenamento em `kinect-tools/storage`).
@@ -263,6 +268,10 @@ Cada afirmação desta seção foi conferida no `xam_17559.exe` com o REA (`batc
 - **Formato das gravações:** `depth_NNNNN.bin` (640×480, 11 bits empacotados do bit mais alto, 422.400 bytes), `color_NNNNN.bin` (Bayer 640×480, 307.200 bytes), `calibration.bin` (142 bytes); a reprodução fica em loop.
 
 ## O que falta (revisado em 2026-10-25, depois da decompilação dos módulos do sistema)
+
+> [!NOTE]
+> **Atualização de 2026-10-28**
+> No branch `kixenia-main` (repositório kixenia): os 22 `XamFitness*` existem (ver [XAM-Fitness](../xam/xam-fitness.md)), os 8 `XamVoice*` que faltavam foram feitos (commit 7c9a5de9e: `GetMicArrayAudio` usa o mesmo caminho da Ex; `MuteMicArray`, `GetMicArrayFilenameDesc` e `DisableMicArray` são aproximados; `GetDirectionalData` e `GetBatteryStatus` respondem sem dispositivo), e o sistema de avatares foi implementado ([Avatares](../avatares/README.md)). O mapa [Kinect-Mapa-XAM](kinect-mapa-xam.md) foi recontado a partir do código.
 
 Situação do branch:
 - Sincronizado com o fork; último commit 5125708b2 (perfil de fitness, ver [XAM-Fitness](../xam/xam-fitness.md)).
@@ -283,7 +292,7 @@ Para o Nike e o Kinect Sports, nenhuma função do Kinect que eles chamam falta:
 1. **Motor, LED e acelerômetro do modelo 1414** (045e:02b0): protocolo completo na seção 14, em [Kinect-ER-USB-e-Protocolos](kinect-er-usb-e-protocolos.md). Não há sensor desse modelo para testar.
 2. **Ajustes de câmera no sensor:** comando 0x95 (0x0106: bits 14 e 1; 0x0009: obturador). Nenhum jogo conhecido pede ajuste manual, e os registradores dos ganhos R/G/B não são conhecidos.
 3. **`GetQualityFlags`:** a 0x2C008 roda uma tarefa assíncrona do serviço de identidade do xam (`FUN_8180EB20`). `IdentifyWithBiometric` e `XamHudSet/GetUserIndex` foram feitas em 855a12dcc, sem passar pelo motor de identidade do título.
-4. **Intrínsecas reais:** `XamNuiGetCameraIntrinsics` devolve valores nominais (855a12dcc); os do sensor de verdade viriam do PsCam 46 com seletor 0x100.
+4. **Intrínsecas reais:** feito em 2026-10-28: `XamNuiGetCameraIntrinsics` calcula a focal da câmera de profundidade a partir do plano zero que o sensor guarda. O que o PsCam 46 com seletor 0x100 responde no console continua sem confirmação direta (precisaria do kernel real).
 5. **Kinect ID do painel:** o callback da 0x2C009 é chamado pelas 0x2C011 a 0x2C013 (4251108a5, 6500fff7d). Falta 0x2C00A, 0x2C006 a 0x2C010 e a tabela de cadastros para respostas reais na 0x2C00D.
 6. **`RememberFloor`:** só registra o plano no log (855a12dcc); a inclinação automática não usa o chão do título.
 7. **TODOs no código:**
@@ -301,6 +310,9 @@ Para o Nike e o Kinect Sports, nenhuma função do Kinect que eles chamam falta:
 6. **Ordinal 2174:** a função é uma checagem de data dos rostos cadastrados; o nome `ControlpackNuiCursorSetTrackingId` na tabela do Xenia parece errado (seção 16g, em [Kinect-ER-Pendencias](kinect-er-pendencias.md)).
 
 ### D. Compatibilidade
+
+- **Bateria de 2026-10-28, fora do Kinect:** Black Eyed Peas, Hip Hop Dance e Motion Explosion: 64 `Invalid instruction` VMX128 (opcodes 0x100B630B, 0x13EB630F e parentes, em 0x8348DD20…) sem travar; Star Wars, Zumba Core e Joy Ride (1024 vezes): `PhysicalHeap::AllocRange` não acha faixa contígua com páginas livres (fragmentação do heap físico); Season Two (GoD): `GAME:\Modules\GestureLibraryDLLR.xex` não encontrado na imagem; Fruit Ninja consulta `XamUserGetSigninInfo` em laço (55 mil vezes em 3 min); Michael Jackson (GoD): falta `d:\Common\Font\base.fnt` no pacote.
+
 1. **Compilar e testar no Windows:** o código novo só foi compilado no Linux.
 2. **macOS:** sem libusb, não aparece sensor.
 3. **Outros jogos Kinect:** no HD só há o Kinect Sports e o Nike; do Kinect Star Wars só existe a part5.rar.

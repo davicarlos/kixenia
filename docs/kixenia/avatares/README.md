@@ -4,6 +4,10 @@ Como o sistema entrega os avatares aos jogos, o que o Xenia Edge faz hoje e o qu
 
 Relacionado: [Kinect-Sports-Season-Two](../kinect/jogos/kinect-sports-season-two.md), [Kinect-Sports](../kinect/jogos/kinect-sports.md), [Kinect-Adventures](../kinect/jogos/kinect-adventures.md), [Kinect-Joy-Ride](../kinect/jogos/kinect-joy-ride.md), [Kinect-Xenia-Edge](../kinect/kinect-xenia-edge.md), [Funcoes-XAM-Indice](../xam/funcoes/README.md), AvatarEditor.xex, Guide.AvatarMiniCreator.xex.
 
+> [!TIP]
+> **Funções**
+> Cada função de avatar do xam 17559 (exports, avatarcore e avatarsyscore, 497 ao todo) tem uma nota, com o que faz, quem chama, o que chama e o decompilado: Avatar-Funcoes-Indice.
+
 ## Arquitetura
 
 As exports `XamAvatar*` quase não fazem nada sozinhas: cada uma manda uma **mensagem a um app do sistema**, e são dois, ambos **embutidos no próprio xam** (tabela de apps do sistema em 0x815F91F0, 16 bytes por app: nome, ID, tratador, flags):
@@ -258,6 +262,48 @@ Commit `1768622c0` (worktree `kinect-sistema`, local): `src/xenia/kernel/xam/xam
 
 **Falta:** texturas do rosto e formas (tipos 2 e 3, 0x819672F8/0x81966138, com os codecs 0x8197A078/0x8197A710); o corpo 0x1000 (esqueleto e animações, 0x81966C98/0x81977310); a validação da paleta (bloco 7, 0x81976598); o remapeamento de skin 0x819713A8 (só para assets de outra versão); pacotes dentro de imagens de disco.
 
+## Manifesto real, avatar aleatório, formas, adereços e animações (2026-10-28)
+
+**Manifesto de verdade** (o que o 4D5308C9 passa ao `GetAssets`): `+0x00` 0; `+0x04` peso e `+0x08` altura em float (−1 a 1); `+0x0C` as 3 formas; `+0x3C` os 6 registros de textura do rosto, **cada um termina com 1.0f em +0x10**; `+0xFC` 9 cores; `+0x120` corpo A com máscara 0x2; `+0x140` cabeça com 0x1; `+0x160` roupas `{ID, máscara, 3 cores}`; `+0x300` os padrões; `+0x380` identificador de 64 bits e `+0x388` 5 bytes.
+
+**Avatar aleatório** (0x8197FF28, via método +0x34 do TOC): até 100 por chamada, tipo de corpo 1/2/3. Peso e altura de {−1, −0,5, 0, 0,5, 1}; cada tipo de peça entra por uma probabilidade por corpo (tabela 0x816343C0: chapéu 20/5 %, luvas 5/5, óculos 10/10, pulso 5/20, brincos 1/75, anel 5/75, barba 10/0, 0x20000 20/40; o resto 100 % ou 0 %). O cabelo usa a variante "(Hat)" quando há chapéu: bit 0 do byte 6 da entrada do TOC limpo. Cores: pele de uma paleta natural de 12, cabelo de uma das 6 paletas escolhida pelo grupo da pele (0x81981448), olhos e lábios naturais, sombra e cor 7; sobrancelhas e barba = cabelo, cor 8 = cor 7. Os números vêm do `XeCryptRandom`. O xam ainda distribui as peças por igual dentro do lote (0x8197F1D0, 0x8197FA98).
+
+**Formas e bloco 4** (0x81966138, 0x81975D80): o bloco 4, sem compressão, muda um componente já montado (o do ID no próprio bloco). Primeira parte (0x8197A078, 0x20 bytes + valores): triângulos a esconder, desfeitos copiando o 1º índice nos outros dois. Segunda (0x8197A710, 0x53 bytes + entradas): vértices substituídos, cada entrada = deslocamento em bytes no VB + um vértice quantizado como os do modelo, com escala e origem próprias. Os tamanhos do IB e do VB do alvo vêm no cabeçalho e precisam bater. Conferido: em todas as formas do pacote, bits restantes = quantidade × bits por entrada (ex.: 16 + 3×14 + 32 + 19 = 109). Roupas também trazem bloco 4 para ajustar o corpo que cobrem.
+
+**Bit 0x1000 não é o corpo humano:** só três peças do pacote do sistema o usam, adereços com esqueleto próprio (Generic Sheep, Snore Sheep, TeddyBear Sleep), com bloco 5 (esqueleto). O corpo humano não tem esqueleto nos assets: quem anima é a biblioteca de avatar do jogo. Com o bit, o resultado ganha em +4 uma estrutura de 0x5C, outro bloco de 0x1B10, a animação de 0x5990 e 0x28000 bytes de dados (0x81967628, 0x81967540).
+
+**Pacote do sistema e TOC v3:** o console usa o `AvatarAsset` da atualização (`$SystemUpdate/FFFE07DF00000002`, PIRS de 16 MB), com `AvatarAssetPack.toc` na **versão 3** (GUID 580A07D6-4BCD-40BE-BF37-254BE826FB0B: cabeçalho 0x30, entradas de 0x10C, dados em +0x104/+0x108; mesmos índices) e um `AvatarAssetPackLegacyV1.toc` (44 entradas). Tem os adereços e 60 animações (o dos jogos, 41).
+
+**Animações** (`XamAvatarLoadAnimation`, 0x81968390 → 0x81977310): bloco 1 = cabeçalho de 0x28 bytes + dados. A estrutura do jogo (0x5990 bytes) diz onde ficam os dados (+0x598C) e quanto cabe (+0x5988); o xam copia os dados e só lê os cabeçalhos: duas listas de trilhas (até 72 ossos × 3 quantizações de 0x34 bytes, em +0 e +0x2BEC), uma de até 3 × 2 quantizações (+0x57D8) e até 5 pares (+0x591C). Quantização = escala, origem e 3 larguras de 6 bits, passos na mesma rede hexagonal (0x81A975B4). As animações do pacote têm 71 ossos.
+
+**No Xenia (commits 28eb51525, 85354347d, 7afcff295, 1e0f7404c):** `GetMetadataRandom` e avatar padrão no `GetManifestLocalUser` (guardado no perfil); formas e bloco 4; opção `avatar_asset_package` (pacote do sistema), leitura do pacote de imagens de disco, TOC v2 e v3, área do bit 0x1000 (adereços não montados); `LoadAnimation`. Testado: 4D5308C9 (formas, pacote v3), 4D4A07E6 (imagem de disco, 4 lotes aleatórios, 0x1FFF, animações), Rapala (animações).
+
+## Esqueleto do corpo no resultado (2026-10-28)
+
+Os jogos leem o bloco de esqueleto do cabeçalho do resultado (`{contagem, ossos}` em [0]) e percorrem os ossos **a partir do primeiro sem olhar a contagem** (Kinect Adventures `0x82A73418`, Kinect Sports `0x82558F30`, ambos na biblioteca XAVATAR embutida). Com o bloco zerado, o osso 0 aponta para si mesmo como filho e a recursão estoura a pilha (foi o crash do Kinect Adventures ao montar o primeiro avatar, e o do Season Two).
+
+O corpo humano não tem esqueleto nos assets: ele vem **embutido no xam**, um por versão de skin (`0x81633B78` v1, `0x81633D98` v2; ponteiros em `0x81A975E8`, 0x21A bytes). Ao fim do GetAssets, 0x819660A0 chama 0x81975C00, que lê o esqueleto com o mesmo leitor do bloco 5 (0x81970830) e o escala pelo peso (M+8) e pela altura (M+4) do manifesto.
+
+**O fluxo:** contagem em 32 bits (71 ossos); cabeçalho de 324 bits a partir do byte 0 (a contagem de novo, a quantização das posições e a dos vetores de rotação, 0x92 bits cada, como nas animações: escala, 3 origens, 3 larguras de 6 bits); registros de 56 bits a partir do byte 0x28 bit 4: pai em 8 bits (0xFF na raiz), posição com larguras 17/17/14 na rede hexagonal dos vértices, vetor de rotação com larguras 0 (pose de descanso sem rotação). Posições de um humanoide: quadril a ~0,76 m, cabeça a ~1,14 m (v2 ~5% mais alto).
+
+**O osso (0x60 bytes):** +0 pai, +4 filho, +8 irmão (0x8196F260: o filho é o último osso que o nomeia como pai, os irmãos em cadeia decrescente); +0x10 posição e +0x20 quaternion no espaço do modelo; +0x30 posição e +0x40 rotação relativas ao pai (0x8196F520); +0x50 escala (1,1,1,1). Com modo de coordenadas ≠ 1, z e x/y do quaternion invertidos.
+
+**Escala:** 0x81974E10 faz `escala ×= 1 + (fator − 1)·|valor|` (valor limitado a 1) e o mesmo na posição local da raiz. Peso: osso 0 (0,9 ou 1,1) e osso 19 (1,05 ou 0,9). Altura: 14 ossos (4, 7, 9, 10, 13, 17, 18, 24, 26, 27, 29, 30, 32, 35) com tabelas por tipo de corpo e sinal (`0x816333B0` a `0x81633570`), as negativas com duas variantes pela versão de skin.
+
+**No Xenia Edge (commit f0f7c2a9c):** os dois fluxos embutidos como arrays; `FillStockSkeleton` no fim do `GetAssets`. Kinect Adventures montou 5 avatares em 3 min sem travar. A ordem de multiplicação do quaternion local é a convenção de Hamilton (mundo = pai ⊗ local); como a pose de descanso não tem rotação, só importará quando um esqueleto de adereço (bloco 5) tiver rotações.
+
+## Enumeração do pacote e mipmaps (2026-10-28)
+
+### `XamAvatarBeginEnumAssets` / `EnumAssets` / `EndEnumAssets`
+Mensagens 0x60000C, 0x60000D e 0x60000E do avatarcore, atendidas pelo item de trabalho assíncrono (tabela 0x81632D78) e repassadas ao **leitor do TOC** (objeto 0x81B4B1FC, vtable 0x81634384 no composto e 0x81634198 no componente do arquivo; métodos +0xC começar, +0x10 próximos, +0x14 terminar).
+- **Begin(?, ?, máscara, tipo de corpo, flags):** os dois primeiros argumentos o leitor ignora. O filtro (0x8197BDA0): o bit 1 do byte 6 da entrada a esconde; o bit 0 a lista no editor e sem ele só entra com a **flag 2**; a máscara precisa de um bit em comum (**flag 4**: igual); o tipo de corpo idem (**flag 8**: igual; **flag 0x10** compara o byte 5 da entrada no lugar do 4); a **flag 1** pede o nome.
+- **Enum(buffer, &contagem):** a contagem entra com quantos itens cabem e sai com quantos foram escritos; 0 encerra, com sucesso. Com a versão passada ao `XamAvatarInitialize` abaixo de 4, sempre 0.
+- **Item de 0x2C4 bytes** (0x8197E300): +0 o ID de 16 bytes da peça (o mesmo dos manifestos), +0x10 máscara, +0x14/+0x15 bytes 4 e 5 da entrada, +0x18 byte 6, +0x1C cópia dos bytes 7 a 0x97, +0xC0 a palavra +0x98, +0xC4 0x20 bytes de +0x9C, +0xE4 o nome (UTF-16BE, até 63 caracteres, terminador em +0x162), +0x164/+0x168 deslocamento e tamanho dos dados, +0x2C0 o bit do pacote (1 no principal).
+- **No Xenia:** `avatar::BeginAssetEnumeration` / `EnumerateAssets` / `EndAssetEnumeration` em `xam_avatar_assets.cc` fazem o mesmo sobre o TOC já carregado, com o nome no idioma de `user_language`. Nenhum dos jogos testados chama a enumeração (é do editor de avatares e da loja), então foi conferida só pela leitura do xam.
+
+### `XamAvatarGenerateMipMaps` (mensagem 0x600007 → 0x8196B1E8)
+Junta as texturas do resultado do GetAssets que ainda não têm mipmaps (até 234), ordena e gera os níveis de cada uma no buffer de mipmaps (0x81978C90): descomprime o nível 0 (DXT1/DXT5 com rotinas próprias, outros formatos pela XG), reduz à metade a cada nível e recomprime, cada nível alinhado a 4 KB, limite 0xA0000 por textura. **No Xenia continua stub** (responde sucesso sem gerar): precisaria de um codificador DXT, e nenhum jogo testado a chama.
+
 ## O que acontece nos jogos Kinect (levantamento de 2026-10-27)
 
 Cada jogo rodou 90 s com a gravação `kinect_rec_aovivo2`, com `allow_avatar_initialization` desligada (o padrão) e ligada:
@@ -267,7 +313,7 @@ Cada jogo rodou 90 s com a gravação `kinect_rec_aovivo2`, com `allow_avatar_in
 | [Kinect-Adventures](../kinect/jogos/kinect-adventures.md) | ✅ roda; chama `Initialize`, recebe falha e `Shutdown` | ✅ roda |
 | [Kinect-Joy-Ride](../kinect/jogos/kinect-joy-ride.md) | ✅ roda (idem) | ✅ roda |
 | [Kinect-Sports](../kinect/jogos/kinect-sports.md) (4D5308C9) | ✅ roda | ❌ **trava**: lê ponteiro nulo em threads de trabalho depois de `GetManifestLocalUser`, `SetCustomAsset` e `ManifestGetBodyType` (✅ corrigido, ver abaixo) |
-| [Kinect-Sports-Season-Two](../kinect/jogos/kinect-sports-season-two.md) | ❌ **trava**: desliga os avatares e depois percorre o esqueleto do avatar vazio (recursão infinita) | ✅ passa do carregamento |
+| [Kinect-Sports-Season-Two](../kinect/jogos/kinect-sports-season-two.md) | ✅ 3 min ao vivo em GoD (2026-10-28) com o esqueleto preenchido e o Kinect ID copiado da imagem; falta `Modules\GestureLibraryDLLR.xex` no pacote | ✅ passa do carregamento |
 | [Motion-Explosion](../kinect/jogos/motion-explosion.md) | ✅ roda | ✅ roda |
 | [Rapala-for-Kinect](../kinect/jogos/rapala-for-kinect.md) | ✅ roda | ✅ roda |
 | [Adrenalin-Misfits](../kinect/jogos/adrenalin-misfits.md) | ✅ roda | ✅ roda |

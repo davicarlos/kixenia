@@ -20,6 +20,7 @@ Importe os executáveis do Xbox 360 com `-processor PowerPC:BE:64:VMX128-32addr`
 | `Dis2.java` | `<endereço> <n>` | Mostra n instruções a partir do endereço, e a função que o contém |
 | `XrefsTo.java` | `<endereço>...` | Lista as referências para cada endereço |
 | `FindScalar.java` | `<valor>...` | Procura instruções de comparação/carga com esses valores imediatos |
+| `FindDisp.java` | `<deslocamento>...` | Lista cargas, armazenamentos e addi com esses deslocamentos de 16 bits (acha acessos a globais sem xref) |
 | `FindWord.java` | `<valor>...` | Procura palavras de 32 bits na memória |
 | `Dump.java` | `<endereço> <tamanho>` | Imprime bytes em hexadecimal |
 | `Floats.java` | `<endereço> <n>` | Imprime n palavras como inteiro e float |

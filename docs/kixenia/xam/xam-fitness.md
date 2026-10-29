@@ -110,3 +110,14 @@ Desde **5125708b2** (2026-10-25), `src/xenia/kernel/xam/xam_fitness.cc` implemen
 1. Abrir o perfil do corpo pelo menu do Nike.
 2. Fazer um treino.
 3. Ver `Fitness: workout of …` no log.
+
+## No Xenia (2026-10-28)
+
+Commits 5125708b2 e 43ecb836c (branch kixenia-main): os 22 exports existem. O perfil fica em `storage_root/fitness/<xuid>.body` (registro atual de 0x10 bytes), `.bodies` (histórico, um registro por `AddBodyProfileRecord`) e `.events` (eventos com tamanho de 16 bits na frente). `XamShowFitnessBodyProfileUI` abre uma janela do Xenia para preencher o corpo.
+
+| Estado | Exports |
+|---|---|
+| ✅ | Initialize, InitializeForOneUser, UnInitialize, GetCurrentBodyProfileRecord, AddBodyProfileRecord, AddFitnessEvent, ClearAll, ContainsFitnessData, GetSyncStatus (sempre 0), GetPrivacySettings, GetSuggestedPrivacySettings (6), os dois Convert*Met e os dois *MsgTime |
+| 🟡 | GetAllBodyProfileRecords (histórico do mais novo ao mais antigo, contagem no overlapped); GetOverallSummary, GetTitleSummary, GetTitleSummaries, GetAllTitleSummaries e CreateFitnessEventEnumerator (formato só do serviço da Live: respostas vazias, buffer zerado, enumerador sem itens); ClearBodyProfileRecords (3 valores do console, em 0) |
+
+Falta: o formato dos resumos e dos itens de 0x24 bytes do enumerador, que só o serviço da Live define. Um jogo que mostre um histórico de treinos é o caminho para decifrá-los.

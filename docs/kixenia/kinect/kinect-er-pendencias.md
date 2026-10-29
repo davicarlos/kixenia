@@ -82,6 +82,6 @@ O padrão `ori rX,rY,0xB00E` não existe no xam (busca completa: 5,7 MB, todos o
 - **Voz:** o que `XVoicedGetDirectionalData` (kernel 0x327) devolve, porque o xam só repassa.
 - **Câmera:** a propriedade 4 e o valor medido; os registradores dos ganhos R/G/B. A escrita pelo comando 0x95 nunca foi testada no sensor.
 - **Kinect ID:** o motor facial dentro do jogo; de onde o xam lê os parâmetros por nome (op 2 da 0x2C00C); o serviço do xam que atende a 0x2C00D com cadastros reais.
-- **PsCam 20/40/44:** o que o sensor responde à propriedade 0x838 (ventilador), ao código 40 (mensagem das flags de qualidade) e ao 44 (calibração carregada). Ver seção 16d.
+- **PsCam 20/40/44:** o que o sensor responde à propriedade 0x838 (ventilador), ao código 40 (mensagem das flags de qualidade) e ao 44 (calibração carregada). Ver seção 16d. **2026-10-28:** o GET_PARAM 0x838 do firmware da câmera responde 0 (e tudo entre 0x7DE e 0x83F também, com o projetor ligado por 4 min); se o driver do console repassa o número da propriedade ao firmware ou o traduz, só o kernel real diria. Ver [16g](kinect-er-xam.md#16g-pscam-20-e-as-intrínsecas-2026-10-28).
 - **Gestos:** decifrados na seção 16g (janelas do guia e referencial do aceno).
 - **Aplicativos do sistema:** nunca foram decompilados, inclusive o comportamento de `XamShowNuiGuideUI` (o xam chama `XamAppRequestLoadEx(4)`).
