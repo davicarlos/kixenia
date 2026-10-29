@@ -693,6 +693,19 @@ dword_result_t XamShowCommunitySessionsUI_entry(dword_t user_index,
 }
 DECLARE_XAM_EXPORT1(XamShowCommunitySessionsUI, kUI, kStub);
 
+// The Guide's voice mail and the game voice channel screens: ten Kinect
+// titles import them for Live voice messages (Doodle Jump, Sesame Street,
+// Crashed Ice, ...); nothing of the sort exists here.
+dword_result_t XamShowVoiceMailUI_entry(dword_t user_index) {
+  return X_ERROR_FUNCTION_FAILED;
+}
+DECLARE_XAM_EXPORT1(XamShowVoiceMailUI, kUI, kStub);
+
+dword_result_t XamShowGameVoiceChannelUI_entry() {
+  return X_ERROR_FUNCTION_FAILED;
+}
+DECLARE_XAM_EXPORT1(XamShowGameVoiceChannelUI, kUI, kStub);
+
 // https://gitlab.com/GlitchyScripts/xlivelessness/-/blob/master/xlivelessness/xlive/xdefs.hpp?ref_type=heads#L1235
 dword_result_t XamShowMarketplaceUIEx_entry(dword_t user_index, dword_t ui_type,
                                             qword_t offer_id,
