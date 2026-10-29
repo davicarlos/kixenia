@@ -56,6 +56,13 @@ class UsbCamera {
 
   virtual const UsbCameraCalibration& calibration() const = 0;
 
+  // False once the camera went away from the bus (unplugged, or the sensor
+  // lost power) until Reconnect brings it back.
+  virtual bool connected() const { return true; }
+  // Opens the camera again and restarts both streams, keeping this object
+  // and its frame listener. False while it isn't back yet.
+  virtual bool Reconnect() { return true; }
+
   // The focal length of the depth camera in pixels at 640x480, from the
   // zero plane the sensor stores: a pixel at the reference distance covers
   // reference_pixel_size on each side of the optical axis. The Kinect's

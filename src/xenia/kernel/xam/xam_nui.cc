@@ -113,9 +113,10 @@ dword_result_t XamNuiGetDeviceStatus_entry(pointer_t<X_NUI_DEVICE_STATUS> status
   status.Zero();
   NUIController* nui = kernel_state()->nui();
   auto* device = nui->device();
-  // A sensor switched off in the settings, or absent, reads as not connected
-  // (0x817FC990).
-  if (!nui->NuiInitialized() || !device->camera_present()) {
+  // A sensor switched off in the settings, absent or momentarily off the USB
+  // bus, reads as not connected (0x817FC990).
+  if (!nui->NuiInitialized() || !device->camera_present() ||
+      !device->connected()) {
     status->camera_status = X_STATUS_DEVICE_NOT_CONNECTED;
     status->audio_status = X_STATUS_DEVICE_NOT_CONNECTED;
     return X_E_SUCCESS;

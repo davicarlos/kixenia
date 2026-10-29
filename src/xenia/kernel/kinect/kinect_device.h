@@ -10,11 +10,14 @@
 #ifndef XENIA_KERNEL_KINECT_KINECT_DEVICE_H_
 #define XENIA_KERNEL_KINECT_KINECT_DEVICE_H_
 
+#include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "xenia/hid/kinect/usb_audio.h"
@@ -41,6 +44,9 @@ class KinectDevice {
   bool camera_present() const { return camera_ != nullptr; }
   bool audio_present() const { return audio_ != nullptr; }
   bool is_recording() const { return is_recording_; }
+  // False while a live sensor is off the USB bus: unplugged, or its power
+  // dropped. It is opened again when it comes back, without restarting.
+  bool connected() const { return !disconnected_; }
 
   // The camera, with the calibration it reports and its newest frames.
   hid::kinect::UsbCamera* camera() const { return camera_.get(); }
@@ -72,6 +78,9 @@ class KinectDevice {
 
  private:
   void OnFrame();
+  // Watches a live sensor and opens it again after it leaves the bus.
+  void WatchConnection();
+  bool Reconnect();
 
   std::unique_ptr<hid::kinect::UsbCamera> camera_;
   std::unique_ptr<hid::kinect::UsbAudio> audio_;
@@ -82,6 +91,13 @@ class KinectDevice {
   std::mutex audio_mutex_;
   std::once_flag serial_once_;
   std::string serial_number_;
+  // The audio firmware, uploaded again when the sensor comes back.
+  std::vector<uint8_t> audio_firmware_;
+  std::atomic<bool> disconnected_ = false;
+  std::thread watcher_;
+  std::mutex watcher_mutex_;
+  std::condition_variable watcher_wake_;
+  bool watching_ = false;
 };
 
 }  // namespace kinect

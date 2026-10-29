@@ -327,7 +327,44 @@ class UsbAudioLibusb : public UsbAudio {
         return false;
       }
     }
-    RegisterOpenAudio(this);
+    if (!registered_) {
+      RegisterOpenAudio(this);
+      registered_ = true;
+    }
+    return true;
+  }
+
+  bool connected() const override { return !lost_; }
+
+  bool Reconnect() override {
+    // The microphones come back with the same listener if they were on.
+    const bool microphones = microphones_started_;
+    std::function<void()> on_window = on_window_;
+    StopMicrophones();
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      if (handle_) {
+        if (claimed_) {
+          libusb_release_interface(handle_, 0);
+        }
+        libusb_close(handle_);
+        handle_ = nullptr;
+      }
+      claimed_ = false;
+      if (context_) {
+        libusb_exit(context_);
+        context_ = nullptr;
+      }
+      tag_ = 1;
+    }
+    in_flight_ = 0;
+    if (!Initialize()) {
+      return false;
+    }
+    lost_ = false;
+    if (microphones && !StartMicrophones(std::move(on_window))) {
+      return false;
+    }
     return true;
   }
 
@@ -373,6 +410,7 @@ class UsbAudioLibusb : public UsbAudio {
     const int result = libusb_bulk_transfer(
         handle_, kReplyEndpoint, reinterpret_cast<uint8_t*>(words),
         sizeof(words), &transferred, kMotorTimeoutMs);
+    NoteResult(result);
     if (result < 0 || transferred != int(sizeof(words))) {
       return false;
     }
@@ -429,9 +467,13 @@ class UsbAudioLibusb : public UsbAudio {
   bool Send(uint32_t command, uint32_t arg1, uint32_t arg2, size_t bytes) {
     FirmwareCommand request = {kCommandMagic, tag_++, arg1, command, arg2};
     int transferred = 0;
+    if (!handle_) {
+      return false;
+    }
     const int result = libusb_bulk_transfer(
         handle_, kCommandEndpoint, reinterpret_cast<uint8_t*>(&request),
         int(bytes), &transferred, kMotorTimeoutMs);
+    NoteResult(result);
     return result >= 0 && size_t(transferred) == bytes;
   }
 
@@ -442,11 +484,24 @@ class UsbAudioLibusb : public UsbAudio {
     const int result =
         libusb_bulk_transfer(handle_, kReplyEndpoint, buffer, sizeof(buffer),
                              &transferred, kMotorTimeoutMs);
+    NoteResult(result);
     if (result < 0 || transferred != sizeof(reply)) {
       return false;
     }
     std::memcpy(&reply, buffer, sizeof(reply));
     return reply.magic == kReplyMagic && reply.status == 0;
+  }
+
+  void NoteResult(int result) {
+    if (result == LIBUSB_ERROR_NO_DEVICE) {
+      MarkLost();
+    }
+  }
+
+  void MarkLost() {
+    if (!lost_.exchange(true)) {
+      XELOGW("Kinect: the audio device went away from the USB bus");
+    }
   }
 
   // Microphone stream: one transfer list per direction.
@@ -494,6 +549,9 @@ class UsbAudioLibusb : public UsbAudio {
         }
         buffer += packet.length;
       }
+    }
+    if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
+      self->MarkLost();
     }
     if (self->microphones_stopping_ ||
         transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
@@ -714,6 +772,8 @@ class UsbAudioLibusb : public UsbAudio {
   libusb_context* context_ = nullptr;
   libusb_device_handle* handle_ = nullptr;
   bool claimed_ = false;
+  bool registered_ = false;
+  std::atomic<bool> lost_ = false;
   std::mutex mutex_;
   uint32_t tag_ = 1;
 

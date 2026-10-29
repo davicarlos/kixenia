@@ -114,8 +114,8 @@ KinectDevice::KinectDevice() {
   // The audio device runs Microsoft's firmware, which must be uploaded before
   // it shows up with its microphones and motor.
   if (!cvars::kinect_audio_firmware_path.empty()) {
-    const std::vector<uint8_t> image =
-        ReadAudioFirmware(cvars::kinect_audio_firmware_path);
+    audio_firmware_ = ReadAudioFirmware(cvars::kinect_audio_firmware_path);
+    const std::vector<uint8_t>& image = audio_firmware_;
     if (image.empty()) {
       XELOGE("Kinect: cannot read the audio firmware from {}",
              xe::strip_pii(
@@ -134,14 +134,75 @@ KinectDevice::KinectDevice() {
   camera_ = hid::kinect::UsbCamera::Open(cvars::kinect_use_usbdk, on_frame);
   XELOGI("Kinect: camera {}, audio device {}", camera_ ? "open" : "not found",
          audio_ ? "open" : "not found");
+  if (camera_ || audio_) {
+    watching_ = true;
+    watcher_ = std::thread([this]() { WatchConnection(); });
+  }
 }
 
 KinectDevice::~KinectDevice() {
+  {
+    std::lock_guard<std::mutex> lock(watcher_mutex_);
+    watching_ = false;
+  }
+  watcher_wake_.notify_all();
+  if (watcher_.joinable()) {
+    watcher_.join();
+  }
   if (audio_) {
     audio_->StopMicrophones();
   }
   // The camera threads stop before the listener goes away.
   camera_.reset();
+}
+
+// A sensor that loses power or its cable leaves the bus whole (its hub, the
+// camera and the audio device) and comes back a few seconds later with new
+// device numbers and the audio device in its bootloader. Titles see it as
+// not connected meanwhile, as on the console.
+void KinectDevice::WatchConnection() {
+  constexpr auto kInterval = std::chrono::seconds(1);
+  std::unique_lock<std::mutex> lock(watcher_mutex_);
+  while (watching_) {
+    watcher_wake_.wait_for(lock, kInterval);
+    if (!watching_) {
+      break;
+    }
+    const bool lost = (camera_ && !camera_->connected()) ||
+                      (audio_ && !audio_->connected());
+    if (!lost && !disconnected_) {
+      continue;
+    }
+    if (!disconnected_.exchange(true)) {
+      XELOGW("Kinect: the sensor left the USB bus; waiting for it to come back");
+    }
+    // Its camera shows up last, once the whole sensor is back.
+    lock.unlock();
+    const bool present = !hid::kinect::ReadSerialNumber().empty();
+    const bool back = present && Reconnect();
+    lock.lock();
+    if (back) {
+      disconnected_ = false;
+      XELOGI("Kinect: the sensor is back");
+    }
+  }
+}
+
+bool KinectDevice::Reconnect() {
+  if (audio_) {
+    std::lock_guard<std::mutex> lock(audio_mutex_);
+    if (!audio_firmware_.empty() &&
+        !hid::kinect::LoadAudioFirmware(audio_firmware_)) {
+      return false;
+    }
+    if (!audio_->Reconnect()) {
+      return false;
+    }
+  }
+  if (audio_ && !cvars::kinect_audio_calibration_path.empty()) {
+    SendAudioCalibration();
+  }
+  return !camera_ || camera_->Reconnect();
 }
 
 void KinectDevice::SetFrameListener(std::function<void()> listener) {

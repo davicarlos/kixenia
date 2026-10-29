@@ -256,6 +256,7 @@ class UsbCameraLibusb : public UsbCamera {
 
   bool Initialize(bool use_usbdk, std::function<void()> on_frame) {
     on_frame_ = std::move(on_frame);
+    use_usbdk_ = use_usbdk;
     if (libusb_init(&context_) < 0) {
       context_ = nullptr;
       return false;
@@ -332,6 +333,28 @@ class UsbCameraLibusb : public UsbCamera {
     return calibration_;
   }
 
+  bool connected() const override { return !lost_; }
+
+  bool Reconnect() override {
+    Close();
+    stopping_ = false;
+    in_flight_ = 0;
+    tag_ = 0;
+    depth_.failed_transfers = 0;
+    color_.failed_transfers = 0;
+    bool opened;
+    {
+      std::lock_guard<xe_mutex> lock(close_mutex_);
+      opened = Initialize(use_usbdk_, std::function<void()>(on_frame_));
+    }
+    if (!opened) {
+      Close();
+      return false;
+    }
+    lost_ = false;
+    return true;
+  }
+
   bool ReadParameter(uint16_t id, uint16_t& value) override {
     // Commands share the control endpoint and the tag with Close; the
     // streams keep running meanwhile.
@@ -370,7 +393,7 @@ class UsbCameraLibusb : public UsbCamera {
 
   void Close() {
     std::lock_guard<xe_mutex> lock(close_mutex_);
-    if (handle_ && running_) {
+    if (handle_ && running_ && !lost_) {
       WriteRegisters({{0x06, 0x00}, {0x05, 0x00}});
     }
     stopping_ = true;
@@ -548,17 +571,29 @@ class UsbCameraLibusb : public UsbCamera {
         buffer += packet.length;
       }
     }
+    if (transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
+      self->MarkLost();
+    }
     if (self->stopping_ || transfer->status == LIBUSB_TRANSFER_NO_DEVICE) {
       --self->in_flight_;
       return;
     }
     const int result = libusb_submit_transfer(transfer);
     if (result < 0) {
+      if (result == LIBUSB_ERROR_NO_DEVICE) {
+        self->MarkLost();
+      }
       --self->in_flight_;
       if (stream.failed_transfers++ < kMaxTransferWarnings) {
         XELOGW("Kinect: cannot resubmit a {} transfer ({})",
                is_depth ? "depth" : "color", libusb_error_name(result));
       }
+    }
+  }
+
+  void MarkLost() {
+    if (!lost_.exchange(true)) {
+      XELOGW("Kinect: the camera went away from the USB bus");
     }
   }
 
@@ -599,7 +634,9 @@ class UsbCameraLibusb : public UsbCamera {
   IsoStream color_;
   std::atomic<bool> running_ = false;
   std::atomic<bool> stopping_ = false;
+  std::atomic<bool> lost_ = false;
   std::atomic<int> in_flight_ = 0;
+  bool use_usbdk_ = true;
   std::unique_ptr<xe::threading::Thread> event_thread_;
   xe_mutex close_mutex_;
 

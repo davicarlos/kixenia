@@ -56,6 +56,13 @@ class UsbAudio {
 
   virtual ~UsbAudio() = default;
 
+  // False once the audio device went away from the bus, until Reconnect.
+  virtual bool connected() const { return true; }
+  // Opens the device again (its firmware must be running: see
+  // LoadAudioFirmware) and restarts the microphones if they were streaming,
+  // keeping this object. False while it isn't back yet.
+  virtual bool Reconnect() { return true; }
+
   virtual bool SetTiltAngle(int32_t degrees) = 0;
   virtual bool StopMovement() = 0;
   virtual bool SetLed(Led led) = 0;

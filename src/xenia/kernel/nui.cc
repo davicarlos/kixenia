@@ -64,7 +64,8 @@ bool NUIController::NuiInitialized() {
 }
 
 bool NUIController::IsDeviceReady() {
-  return NuiInitialized() && device()->camera_present();
+  return NuiInitialized() && device()->camera_present() &&
+         device()->connected();
 }
 
 void NUIController::InitializeTitle(uint64_t xam_version, uint64_t xtl_version,
