@@ -259,14 +259,123 @@ X_PSCAM_COLOR_SETTINGS DefaultColorSettings(uint32_t set) {
   return settings;
 }
 
+// What the title asked of the color stream with code 35, applied to the
+// sensor's frame. The identity runtime turns on the window and moves it onto
+// a player's face (region_enabled, region_x, region_y in pixels of the
+// sensor's full 1280x960 picture from its center): the console then sends
+// that 640x480 part at full resolution instead of the whole picture at half.
+// The sensor here streams the whole picture at 640x480, so the window is
+// its 320x240 part around the same point, scaled up twice. The runtime's
+// exposure control also raises the red, green and blue gains until the face
+// is bright enough; the sensor exposes itself, so they go on top. Without
+// either the face detector never finds a face and Kinect ID enrollment
+// never collects its samples.
+struct ColorView {
+  bool window = false;
+  int32_t window_x = 0;
+  int32_t window_y = 0;
+  float gains[3] = {1.0f, 1.0f, 1.0f};
+
+  static ColorView From(const X_PSCAM_COLOR_SETTINGS& settings) {
+    ColorView view;
+    view.window = settings.region_enabled == 1;
+    if (view.window) {
+      view.window_x = settings.region_x;
+      view.window_y = settings.region_y;
+    }
+    for (uint32_t i = 0; i < 3; ++i) {
+      if (settings.flags & (2u << i)) {
+        const float gain = float(int32_t(settings.gains[i])) / kFixedOne;
+        view.gains[i] = std::clamp(gain, 1.0f / 64.0f, 64.0f);
+      }
+    }
+    return view;
+  }
+
+  bool identity() const {
+    return !window && gains[0] == 1.0f && gains[1] == 1.0f &&
+           gains[2] == 1.0f;
+  }
+};
+
+// The sensor's GRBG Bayer frame as the title asked for it, still GRBG: each
+// output pixel takes its color from the same color's samples around the
+// point it shows, interpolated between the two nearest on each axis.
+void ViewColorFrame(const uint8_t* in, const ColorView& view, uint8_t* out) {
+  constexpr int kWidth = int(kFrameWidth);
+  constexpr int kHeight = int(kFrameHeight);
+  // For each output column (or row), in each of the mosaic's two phases:
+  // the two source columns of that phase around the point and the weight of
+  // the second.
+  struct Tap {
+    int a, b;
+    float t;
+  };
+  auto make_taps = [&view](int size, int32_t offset, std::vector<Tap>* taps) {
+    for (int phase = 0; phase < 2; ++phase) {
+      taps[phase].resize(size);
+    }
+    // Full-resolution pixels from the center are half as many here.
+    const float origin = size * 0.25f + offset * 0.5f;
+    for (int i = 0; i < size; ++i) {
+      const float source =
+          view.window ? origin + (i + 0.5f) * 0.5f - 0.5f : float(i);
+      for (int phase = 0; phase < 2; ++phase) {
+        const int count = size / 2;
+        const float position = (source - phase) * 0.5f;
+        int k = int(std::floor(position));
+        float t = position - float(k);
+        if (k < 0) {
+          k = 0;
+          t = 0.0f;
+        } else if (k >= count - 1) {
+          k = count - 1;
+          t = 0.0f;
+        }
+        taps[phase][i] = {phase + 2 * k, phase + 2 * std::min(k + 1, count - 1),
+                          t};
+      }
+    }
+  };
+  std::vector<Tap> columns[2], rows[2];
+  make_taps(kWidth, view.window_x, columns);
+  make_taps(kHeight, view.window_y, rows);
+  auto sample = [&](int column_phase, int row_phase, int x, int y) {
+    const Tap& c = columns[column_phase][x];
+    const Tap& r = rows[row_phase][y];
+    const uint8_t* top = in + r.a * kWidth;
+    const uint8_t* bottom = in + r.b * kWidth;
+    const float upper = top[c.a] + (top[c.b] - top[c.a]) * c.t;
+    const float lower = bottom[c.a] + (bottom[c.b] - bottom[c.a]) * c.t;
+    return upper + (lower - upper) * r.t;
+  };
+  for (int y = 0; y < kHeight; ++y) {
+    for (int x = 0; x < kWidth; ++x) {
+      float value;
+      if ((x ^ y) & 1) {
+        // Red sits on even rows at odd columns, blue on odd rows at even ones.
+        value = y & 1 ? sample(0, 1, x, y) * view.gains[2]
+                      : sample(1, 0, x, y) * view.gains[0];
+      } else {
+        // Green has a sample in both phases; both are averaged.
+        value = (sample(0, 0, x, y) + sample(1, 1, x, y)) * 0.5f *
+                view.gains[1];
+      }
+      out[y * kWidth + x] = uint8_t(std::min(value + 0.5f, 255.0f));
+    }
+  }
+}
+
 struct Completion {
   uint32_t request_ptr = 0;
   uint32_t routine = 0;
   X_STATUS status = X_STATUS_SUCCESS;
   uint32_t bytes = 0;
-  // A settings request: color frames carry this generation once it's done.
+  // A settings request: color frames carry this generation once it's done,
+  // and are taken with these settings from then on.
   bool sets_generation = false;
   uint8_t generation = 0;
+  ColorView view;
 };
 
 class CameraService {
@@ -343,6 +452,7 @@ class CameraService {
           XSUCCEEDED(completion.status)) {
         completion.sets_generation = true;
         completion.generation = requested_generation_;
+        completion.view = ColorView::From(color_settings_[active_set_]);
       }
       if (code == PsCamCode::kStop) {
         // Reads waiting for a frame end with the stream.
@@ -634,7 +744,19 @@ class CameraService {
       if (!cvars::kinect_record_path.empty()) {
         record_color_ = frame_;
       }
-      std::memcpy(Guest<uint8_t>(buffer), frame_.data(), bytes);
+      ColorView view;
+      {
+        std::lock_guard<std::mutex> lock(view_mutex_);
+        view = view_;
+      }
+      if (view.identity()) {
+        std::memcpy(Guest<uint8_t>(buffer), frame_.data(), bytes);
+      } else {
+        // Built aside: the title's buffer is read while it is written.
+        viewed_.resize(bytes);
+        ViewColorFrame(frame_.data(), view, viewed_.data());
+        std::memcpy(Guest<uint8_t>(buffer), viewed_.data(), bytes);
+      }
       request->settings_generation = settings_generation_;
     }
     if (const uint32_t info_ptr = request->frame_info_ptr) {
@@ -692,6 +814,15 @@ class CameraService {
                                           xe::countof(args));
     }
     if (completion.sets_generation) {
+      {
+        std::lock_guard<std::mutex> lock(view_mutex_);
+        if (completion.view.window != view_.window) {
+          XELOGI("Kinect: color window {} at {}, {}",
+                 completion.view.window ? "on" : "off",
+                 completion.view.window_x, completion.view.window_y);
+        }
+        view_ = completion.view;
+      }
       settings_generation_ = completion.generation;
     }
   }
@@ -773,6 +904,10 @@ class CameraService {
   bool logged_color_ = false;
 
   std::atomic<uint8_t> settings_generation_ = 0;
+  // The settings color frames are taken with, from the last completed 35.
+  std::mutex view_mutex_;
+  ColorView view_;
+  std::vector<uint8_t> viewed_;
   std::atomic<uint64_t> logged_codes_ = 0;
 };
 
