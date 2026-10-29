@@ -488,6 +488,9 @@ struct QueuedPart {
 struct Buffers {
   uint32_t result_base, result_size, result_next;
   uint32_t gpu_base, gpu_size, gpu_next;
+  // The components the title asked for: the room GetAssetsResultSize
+  // budgeted. A part covering others too only gets room for these.
+  uint16_t request_mask;
 
   uint32_t Allocate(bool gpu, uint32_t size, uint32_t alignment) {
     uint32_t& next = gpu ? gpu_next : result_next;
@@ -830,7 +833,7 @@ bool BuildComponent(const QueuedPart& part,
   uint16_t mask = xe::load_and_swap<uint16_t>(&part.record[0x10]);
   uint32_t result_room = 0, gpu_room = 0;
   for (uint32_t i = 0; i < xe::countof(kComponentSizes); ++i) {
-    if (mask & (1u << i)) {
+    if (mask & buffers.request_mask & (1u << i)) {
       result_room += kComponentSizes[i].header;
       gpu_room += kComponentSizes[i].gpu_resources;
     }
@@ -2415,6 +2418,7 @@ X_HRESULT GetAssets(const uint8_t* manifest, uint16_t component_mask,
   Buffers buffers{};
   GetAssetsResultSize(component_mask, &buffers.result_size,
                       &buffers.gpu_size);
+  buffers.request_mask = component_mask;
   buffers.result_base = result_buffer_ptr;
   buffers.gpu_base = gpu_resource_buffer_ptr;
   // 0x81967628: the header, then the skeleton block, the part records and
