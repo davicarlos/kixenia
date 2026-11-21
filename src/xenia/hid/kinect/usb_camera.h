@@ -62,6 +62,9 @@ class UsbCamera {
   // Opens the camera again and restarts both streams, keeping this object
   // and its frame listener. False while it isn't back yet.
   virtual bool Reconnect() { return true; }
+  // The USB serial number read when the camera was opened, empty when it has
+  // none or this isn't a live camera.
+  virtual std::string serial_number() const { return {}; }
 
   // The focal length of the depth camera in pixels at 640x480, from the
   // zero plane the sensor stores: a pixel at the reference distance covers
@@ -94,7 +97,7 @@ class UsbCamera {
 };
 
 // The connected camera's USB serial number, empty when there's no camera.
-std::string ReadSerialNumber();
+std::string ReadSerialNumber(bool use_usbdk);
 
 // A recording directory holds calibration.bin and, for each frame N,
 // depth_NNNNN.bin (packed 11-bit depth) and color_NNNNN.bin (Bayer color).

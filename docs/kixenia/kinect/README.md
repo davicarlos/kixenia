@@ -7,6 +7,7 @@ Os jogos testados estão em [jogos/](jogos/README.md).
 ## Kinect no Xenia Edge
 
 - [Kinect-Xenia-Edge](kinect-xenia-edge.md) — **comece aqui**: o que funciona, como usar, testes e o que falta
+- [Kinect no Windows](windows.md) — compilar, rodar com `--gpu=vulkan`, firmware de áudio e os problemas conhecidos
 - [Kinect-ID](kinect-id.md) — reconhecimento facial: API do xam, mensagens 0x2C0xx, o caminho do cadastro e os endereços no Nike
 - [Kinect-Ajustes-de-Camera](kinect-ajustes-de-camera.md) — PsCamDeviceRequest 35/36: exposição, ganhos, janela de medição
 - [Kinect-Audio-Firmware-e-CEMD](kinect-audio-firmware-e-cemd.md) — pacote de firmware (cambridge/altair/detroit/pmc), protocolo CEMD, calibração da matriz

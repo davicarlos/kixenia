@@ -708,7 +708,7 @@ static bool ReadTilt(NUIController* nui, hid::kinect::UsbAudio::State& motor) {
     return true;
   }
   motor = {};
-  const double angle = nui->GetElevationAngle() * M_PI / 180.0;
+  const double angle = nui->GetElevationAngle() * 3.14159265358979323846 / 180.0;
   motor.gravity[1] = int16_t(std::lround(kOneG * std::cos(angle)));
   motor.gravity[2] = int16_t(std::lround(kOneG * std::sin(angle)));
   for (size_t i = 0; i < 3; ++i) {

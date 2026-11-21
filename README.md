@@ -26,6 +26,7 @@ Cada mudança é um commit com a explicação completa na mensagem: o problema, 
 ## Usar
 
 1. Compile como o Xenia Edge: [docs/building.md](docs/building.md).
+   No Windows, veja também [o guia de Kinect no Windows](docs/kixenia/kinect/windows.md): use `--gpu=vulkan` e saiba como carregar o firmware de áudio.
 2. Configure o Kinect: [docs/kinect.md](docs/kinect.md) explica o sensor, as permissões no Linux, as opções (`allow_kinect_camera`, `kinect_audio_firmware_path`, gravações) e o Kinect Tuner.
 3. Para os avatares, ligue `allow_avatar_initialization` (opção em `[Kernel]`). O jogo precisa trazer o arquivo `AvatarAssetPack` na pasta dele, e precisa estar extraído numa pasta (não numa imagem de disco).
 
