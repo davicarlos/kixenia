@@ -178,7 +178,8 @@ void KinectDevice::WatchConnection() {
     }
     // Its camera shows up last, once the whole sensor is back.
     lock.unlock();
-    const bool present = !hid::kinect::ReadSerialNumber().empty();
+    const bool present =
+        !hid::kinect::ReadSerialNumber(cvars::kinect_use_usbdk).empty();
     const bool back = present && Reconnect();
     lock.lock();
     if (back) {
@@ -291,7 +292,18 @@ const std::string& KinectDevice::serial_number() {
   // Read once: it takes control transfers.
   std::call_once(serial_once_, [this]() {
     if (camera_ && !is_recording_) {
-      serial_number_ = hid::kinect::ReadSerialNumber();
+      // The open camera has it; a second open would fail with UsbDk.
+      serial_number_ = camera_->serial_number();
+      // Some sensors' camera reports only zeros; the audio device carries the
+      // real serial number, as the Windows driver stack shows.
+      if (serial_number_.find_first_not_of('0') == std::string::npos &&
+          audio_ && !audio_->serial_number().empty()) {
+        serial_number_ = audio_->serial_number();
+      }
+      if (serial_number_.empty()) {
+        serial_number_ =
+            hid::kinect::ReadSerialNumber(cvars::kinect_use_usbdk);
+      }
     }
   });
   return serial_number_;

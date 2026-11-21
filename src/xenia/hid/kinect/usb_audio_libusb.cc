@@ -296,6 +296,20 @@ class UsbAudioLibusb : public UsbAudio {
       XELOGW("Kinect: the audio firmware isn't running; no motor or LED");
       return false;
     }
+    {
+      libusb_device_descriptor descriptor;
+      unsigned char serial[64];
+      serial_number_.clear();
+      if (libusb_get_device_descriptor(libusb_get_device(handle_),
+                                       &descriptor) == 0 &&
+          descriptor.iSerialNumber) {
+        const int length = libusb_get_string_descriptor_ascii(
+            handle_, descriptor.iSerialNumber, serial, sizeof(serial));
+        if (length > 0) {
+          serial_number_.assign(reinterpret_cast<char*>(serial), length);
+        }
+      }
+    }
     libusb_set_auto_detach_kernel_driver(handle_, 1);
     if (libusb_claim_interface(handle_, 0) < 0) {
       XELOGE("Kinect: cannot claim the motor interface");
@@ -335,6 +349,8 @@ class UsbAudioLibusb : public UsbAudio {
   }
 
   bool connected() const override { return !lost_; }
+
+  std::string serial_number() const override { return serial_number_; }
 
   bool Reconnect() override {
     // The microphones come back with the same listener if they were on.
@@ -772,6 +788,7 @@ class UsbAudioLibusb : public UsbAudio {
   libusb_context* context_ = nullptr;
   libusb_device_handle* handle_ = nullptr;
   bool claimed_ = false;
+  std::string serial_number_;
   bool registered_ = false;
   std::atomic<bool> lost_ = false;
   std::mutex mutex_;

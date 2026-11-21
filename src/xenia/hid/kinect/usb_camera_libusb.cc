@@ -128,6 +128,22 @@ libusb_device_handle* OpenDevice(libusb_context* context, uint16_t product_id) {
   return handle;
 }
 
+// The USB serial number string of an open device, empty when it has none.
+std::string ReadSerialNumberString(libusb_device_handle* handle) {
+  libusb_device_descriptor descriptor;
+  unsigned char serial[64];
+  if (libusb_get_device_descriptor(libusb_get_device(handle), &descriptor) ==
+          0 &&
+      descriptor.iSerialNumber) {
+    const int length = libusb_get_string_descriptor_ascii(
+        handle, descriptor.iSerialNumber, serial, sizeof(serial));
+    if (length > 0) {
+      return std::string(reinterpret_cast<char*>(serial), length);
+    }
+  }
+  return {};
+}
+
 #pragma pack(push, 1)
 struct CommandHeader {
   uint8_t magic[2];
@@ -280,6 +296,8 @@ class UsbCameraLibusb : public UsbCamera {
     if (!handle_) {
       return false;
     }
+    // Read it now: with UsbDk a second open of this camera would fail.
+    serial_number_ = ReadSerialNumberString(handle_);
     // Takes the camera interface from a kernel driver (gspca_kinect on Linux)
     // while it's claimed; a backend without kernel drivers reports
     // LIBUSB_ERROR_NOT_SUPPORTED, which is fine.
@@ -334,6 +352,8 @@ class UsbCameraLibusb : public UsbCamera {
   }
 
   bool connected() const override { return !lost_; }
+
+  std::string serial_number() const override { return serial_number_; }
 
   bool Reconnect() override {
     Close();
@@ -627,6 +647,7 @@ class UsbCameraLibusb : public UsbCamera {
   const char* backend_ = "libusb";
   uint16_t tag_ = 0;
   UsbCameraCalibration calibration_;
+  std::string serial_number_;
   std::function<void()> on_frame_;
   FrameAssembler depth_frames_{kDepthStreamFlag, kDepthFrameBytes, &on_frame_};
   FrameAssembler color_frames_{kColorStreamFlag, kColorFrameBytes, &on_frame_};
@@ -683,24 +704,22 @@ std::unique_ptr<UsbCamera> UsbCamera::Open(bool use_usbdk,
   return camera;
 }
 
-std::string ReadSerialNumber() {
+std::string ReadSerialNumber(bool use_usbdk) {
   libusb_context* context;
   if (libusb_init(&context) < 0) {
     return {};
   }
+#if XE_PLATFORM_WIN32
+  // The camera may only be reachable through UsbDk, as in Open.
+  if (use_usbdk) {
+    libusb_set_option(context, LIBUSB_OPTION_USE_USBDK);
+  }
+#else
+  static_cast<void>(use_usbdk);
+#endif
   std::string serial_number;
   if (libusb_device_handle* handle = OpenDevice(context, kCameraProductId)) {
-    libusb_device_descriptor descriptor;
-    unsigned char serial[64];
-    if (libusb_get_device_descriptor(libusb_get_device(handle), &descriptor) ==
-            0 &&
-        descriptor.iSerialNumber) {
-      const int length = libusb_get_string_descriptor_ascii(
-          handle, descriptor.iSerialNumber, serial, sizeof(serial));
-      if (length > 0) {
-        serial_number.assign(reinterpret_cast<char*>(serial), length);
-      }
-    }
+    serial_number = ReadSerialNumberString(handle);
     libusb_close(handle);
   }
   libusb_exit(context);
