@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <memory>
 #include <vector>
 
@@ -62,6 +63,9 @@ class UsbAudio {
   // LoadAudioFirmware) and restarts the microphones if they were streaming,
   // keeping this object. False while it isn't back yet.
   virtual bool Reconnect() { return true; }
+  // The USB serial number of the audio device, read when it was opened; the
+  // camera's own is all zeros on some sensors. Empty when unknown.
+  virtual std::string serial_number() const { return {}; }
 
   virtual bool SetTiltAngle(int32_t degrees) = 0;
   virtual bool StopMovement() = 0;
